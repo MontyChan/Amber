@@ -4,7 +4,7 @@ Seal it in amber, and leave it at that.
 
 Amber is a local cold-archive CLI/TUI for directories you want to keep, index, and recover later. It uses 7z for archive packages and SQLite for metadata indexing, so archived folders stay searchable instead of disappearing into opaque compressed blobs.
 
-[中文说明](./README.zh-CN.md)
+[中文](./README.zh-CN.md)
 
 ## Overview
 
