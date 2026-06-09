@@ -4,19 +4,34 @@ namespace Vault.Core;
 
 public sealed class FileSorter
 {
+    private const int HistogramReadSize = 4096;
+    private const int FullSimilarityThreshold = 128;
+    private const int ChunkedSimilarityThreshold = 1024;
+        private const int SimilarityChunkSize = 64;
+    private const int ApproximationSampleSize = 24;
+    private const int ProgressReportInterval = 256;
+
     private static readonly HashSet<string> StoredExtensions = new(StringComparer.OrdinalIgnoreCase)
+
+
     {
         ".jpg", ".jpeg", ".png", ".gif", ".webp", ".mp4", ".mkv", ".mov", ".avi", ".mp3", ".flac", ".aac", ".zip", ".7z", ".rar", ".gz", ".br", ".zst"
     };
 
-        public FileClassificationResult ClassifyAndSort(string rootDirectory, IReadOnlyCollection<string> filePaths, bool includeHighEntropyFilesInCompression = false)
-
+            public FileClassificationResult ClassifyAndSort(
+        string rootDirectory,
+        IReadOnlyCollection<string> filePaths,
+        bool includeHighEntropyFilesInCompression = false,
+        Action<int>? progressCallback = null)
     {
         List<ArchiveCandidateFile> storedFiles = new();
         Dictionary<string, List<ArchiveCandidateFile>> compressibleByExtension = new(StringComparer.OrdinalIgnoreCase);
+        int processedCount = 0;
 
         foreach (string filePath in filePaths)
         {
+
+
             FileInfo fileInfo = new(filePath);
             string relativePath = NormalizeRelativePath(rootDirectory, filePath);
             ArchiveCandidateFile candidate = new(
@@ -27,30 +42,43 @@ public sealed class FileSorter
                 fileInfo.LastWriteTimeUtc,
                 Path.GetExtension(filePath));
 
-                        if (StoredExtensions.Contains(candidate.Extension) && !includeHighEntropyFilesInCompression)
-
+                                    if (StoredExtensions.Contains(candidate.Extension) && !includeHighEntropyFilesInCompression)
             {
                 storedFiles.Add(candidate);
+                processedCount++;
+                ReportProgress(processedCount, filePaths.Count, progressCallback);
                 continue;
             }
 
             string extensionKey = candidate.Extension.Length == 0 ? "<noext>" : candidate.Extension;
+
             if (!compressibleByExtension.TryGetValue(extensionKey, out List<ArchiveCandidateFile>? bucket))
             {
                 bucket = new List<ArchiveCandidateFile>();
                 compressibleByExtension[extensionKey] = bucket;
             }
 
-            bucket.Add(candidate);
+                                    bucket.Add(candidate);
+            processedCount++;
+            ReportProgress(processedCount, filePaths.Count, progressCallback);
+
         }
 
-        List<ArchiveCandidateFile> sortedCompressed = new();
+        if (processedCount < filePaths.Count)
+        {
+            ReportProgress(filePaths.Count, filePaths.Count, progressCallback);
+        }
+
+        List<ArchiveCandidateFile> sortedCompressed = new(filePaths.Count - storedFiles.Count);
+
         foreach ((string _, List<ArchiveCandidateFile> group) in compressibleByExtension.OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase))
         {
-            sortedCompressed.AddRange(SortBySimilarity(group));
+            sortedCompressed.AddRange(SortForArchive(group));
         }
 
-        return new FileClassificationResult(sortedCompressed, storedFiles.OrderBy(file => file.RelativePath, StringComparer.OrdinalIgnoreCase).ToList());
+        return new FileClassificationResult(
+            sortedCompressed,
+            storedFiles.OrderBy(file => file.RelativePath, StringComparer.OrdinalIgnoreCase).ToList());
     }
 
     public static string NormalizeRelativePath(string rootDirectory, string filePath)
@@ -64,47 +92,88 @@ public sealed class FileSorter
         return relativePath.Replace('/', Path.DirectorySeparatorChar);
     }
 
-    private static IReadOnlyList<ArchiveCandidateFile> SortBySimilarity(IReadOnlyList<ArchiveCandidateFile> group)
+    private static IReadOnlyList<ArchiveCandidateFile> SortForArchive(IReadOnlyList<ArchiveCandidateFile> group)
     {
         if (group.Count <= 1)
         {
             return group;
         }
 
+        List<ArchiveCandidateFile> baselineOrder = group
+            .OrderBy(file => GetDirectoryKey(file.RelativePath), StringComparer.OrdinalIgnoreCase)
+            .ThenBy(file => file.Extension, StringComparer.OrdinalIgnoreCase)
+            .ThenByDescending(file => file.Size)
+            .ThenBy(file => file.RelativePath, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (baselineOrder.Count <= FullSimilarityThreshold)
+        {
+            return SortBySimilarity(baselineOrder, useApproximation: false);
+        }
+
+        if (baselineOrder.Count <= ChunkedSimilarityThreshold)
+        {
+            return SortInChunksBySimilarity(baselineOrder, SimilarityChunkSize);
+        }
+
+        return baselineOrder;
+    }
+
+    private static IReadOnlyList<ArchiveCandidateFile> SortInChunksBySimilarity(IReadOnlyList<ArchiveCandidateFile> orderedGroup, int chunkSize)
+    {
+        List<ArchiveCandidateFile> result = new(orderedGroup.Count);
+
+        for (int index = 0; index < orderedGroup.Count; index += chunkSize)
+        {
+            int currentChunkSize = Math.Min(chunkSize, orderedGroup.Count - index);
+            List<ArchiveCandidateFile> chunk = new(currentChunkSize);
+            for (int chunkIndex = 0; chunkIndex < currentChunkSize; chunkIndex++)
+            {
+                chunk.Add(orderedGroup[index + chunkIndex]);
+            }
+
+            result.AddRange(SortBySimilarity(chunk, useApproximation: currentChunkSize > 32));
+        }
+
+        return result;
+    }
+
+    private static IReadOnlyList<ArchiveCandidateFile> SortBySimilarity(IReadOnlyList<ArchiveCandidateFile> group, bool useApproximation)
+    {
+        if (group.Count <= 1)
+        {
+            return group;
+        }
+
+        List<ArchiveCandidateFile> remaining = group
+            .Select(item => item with { Histogram = ReadHistogram(item.FullPath) })
+            .ToList();
+
         List<ArchiveCandidateFile> ordered = new(group.Count);
-        List<ArchiveCandidateFile> remaining = group.Select(item => item with { Histogram = ReadHistogram(item.FullPath) }).ToList();
         ArchiveCandidateFile current = remaining[0];
         ordered.Add(current);
         remaining.RemoveAt(0);
 
-        bool useApproximation = group.Count > 500;
-        RandomNumberGenerator randomNumberGenerator = RandomNumberGenerator.Create();
-
         while (remaining.Count > 0)
         {
-            int bestIndex = FindBestNextIndex(current, remaining, useApproximation, randomNumberGenerator);
+            int bestIndex = FindBestNextIndex(current, remaining, useApproximation);
             current = remaining[bestIndex];
             ordered.Add(current);
             remaining.RemoveAt(bestIndex);
         }
 
-        randomNumberGenerator.Dispose();
         return ordered;
     }
 
-    private static int FindBestNextIndex(
-        ArchiveCandidateFile current,
-        IReadOnlyList<ArchiveCandidateFile> candidates,
-        bool useApproximation,
-        RandomNumberGenerator randomNumberGenerator)
+    private static int FindBestNextIndex(ArchiveCandidateFile current, IReadOnlyList<ArchiveCandidateFile> candidates, bool useApproximation)
     {
-        if (!useApproximation || candidates.Count <= 50)
+        if (!useApproximation || candidates.Count <= ApproximationSampleSize)
         {
             return FindBestNextIndex(current, candidates, Enumerable.Range(0, candidates.Count));
         }
 
         HashSet<int> sampleIndexes = new();
-        while (sampleIndexes.Count < 50 && sampleIndexes.Count < candidates.Count)
+        while (sampleIndexes.Count < ApproximationSampleSize && sampleIndexes.Count < candidates.Count)
         {
             sampleIndexes.Add(RandomNumberGenerator.GetInt32(candidates.Count));
         }
@@ -132,15 +201,14 @@ public sealed class FileSorter
 
     private static double[] ReadHistogram(string filePath)
     {
-        const int readSize = 4096;
-        byte[] histogram = new byte[readSize];
-        using FileStream stream = new(filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
-        int bytesRead = stream.Read(histogram, 0, readSize);
+        byte[] buffer = new byte[HistogramReadSize];
+        using FileStream stream = new(filePath, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: HistogramReadSize, FileOptions.SequentialScan);
+        int bytesRead = stream.Read(buffer, 0, buffer.Length);
         double[] frequencies = new double[256];
 
         for (int index = 0; index < bytesRead; index++)
         {
-            frequencies[histogram[index]] += 1;
+            frequencies[buffer[index]] += 1;
         }
 
         if (bytesRead == 0)
@@ -176,6 +244,29 @@ public sealed class FileSorter
 
         return dot / (Math.Sqrt(leftMagnitude) * Math.Sqrt(rightMagnitude));
     }
+
+        private static void ReportProgress(int processedCount, int totalCount, Action<int>? progressCallback)
+
+    {
+        if (progressCallback is null)
+        {
+            return;
+        }
+
+        if (processedCount < totalCount && processedCount % ProgressReportInterval != 0)
+        {
+            return;
+        }
+
+        progressCallback(processedCount);
+    }
+
+    private static string GetDirectoryKey(string relativePath)
+    {
+
+        int separatorIndex = relativePath.LastIndexOf('/');
+        return separatorIndex < 0 ? string.Empty : relativePath[..separatorIndex];
+    }
 }
 
 public sealed class FileClassificationResult
@@ -201,3 +292,5 @@ public sealed record ArchiveCandidateFile(
 {
     public double[] Histogram { get; init; } = Array.Empty<double>();
 }
+
+

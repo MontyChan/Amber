@@ -1,12 +1,16 @@
+using System.Data;
 using Dapper;
 using Microsoft.Data.Sqlite;
 using Vault.Models;
+
 
 namespace Vault.Data;
 
 public sealed class ArchiveRepository
 {
+    private const int ProgressReportInterval = 256;
     private readonly Database _database;
+
 
     public ArchiveRepository(Database database)
     {
@@ -33,7 +37,12 @@ public sealed class ArchiveRepository
         await migrator.MigrateAsync(new StorageMigrationPlan(databasePath, archiveOutputDirectory), cancellationToken);
     }
 
-    public async Task<long> InsertArchiveAsync(Archive archive, IReadOnlyCollection<ArchiveFile> files, CancellationToken cancellationToken = default)
+        public async Task<long> InsertArchiveAsync(
+            Archive archive,
+            IReadOnlyCollection<ArchiveFile> files,
+            Action<int>? progressCallback = null,
+            CancellationToken cancellationToken = default)
+
     {
         await using SqliteConnection connection = _database.OpenConnection();
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
@@ -49,25 +58,61 @@ SELECT last_insert_rowid();";
             transaction,
             cancellationToken: cancellationToken));
 
-        const string fileSql = @"
-INSERT INTO files (archive_id, relative_path, size, modified_at, is_stored)
-VALUES (@ArchiveId, @RelativePath, @Size, @ModifiedAt, @IsStored);";
-
-        foreach (ArchiveFile file in files)
+        if (files.Count > 0)
         {
-            file.ArchiveId = archiveId;
-            await connection.ExecuteAsync(new CommandDefinition(
-                fileSql,
-                file,
-                transaction,
-                cancellationToken: cancellationToken));
+            await using SqliteCommand command = connection.CreateCommand();
+            command.Transaction = (SqliteTransaction)transaction;
+            command.CommandText = @"
+INSERT INTO files (archive_id, relative_path, size, modified_at, is_stored)
+VALUES ($archiveId, $relativePath, $size, $modifiedAt, $isStored);";
+
+            SqliteParameter archiveIdParameter = command.Parameters.Add("$archiveId", SqliteType.Integer);
+            SqliteParameter relativePathParameter = command.Parameters.Add("$relativePath", SqliteType.Text);
+            SqliteParameter sizeParameter = command.Parameters.Add("$size", SqliteType.Integer);
+            SqliteParameter modifiedAtParameter = command.Parameters.Add("$modifiedAt", SqliteType.Text);
+            SqliteParameter isStoredParameter = command.Parameters.Add("$isStored", SqliteType.Integer);
+
+            archiveIdParameter.Value = archiveId;
+            command.Prepare();
+
+                        int persistedCount = 0;
+
+            foreach (ArchiveFile file in files)
+            {
+                file.ArchiveId = archiveId;
+                relativePathParameter.Value = file.RelativePath;
+                sizeParameter.Value = file.Size;
+                modifiedAtParameter.Value = file.ModifiedAt;
+                isStoredParameter.Value = file.IsStored ? 1 : 0;
+                await command.ExecuteNonQueryAsync(cancellationToken);
+                persistedCount++;
+                ReportProgress(persistedCount, files.Count, progressCallback);
+            }
+
         }
 
-        await transaction.CommitAsync(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
         return archiveId;
     }
 
+    private static void ReportProgress(int processedCount, int totalCount, Action<int>? progressCallback)
+    {
+        if (progressCallback is null)
+        {
+            return;
+        }
+
+        if (processedCount < totalCount && processedCount % ProgressReportInterval != 0)
+        {
+            return;
+        }
+
+        progressCallback(processedCount);
+    }
+
+
     public async Task<IReadOnlyList<ArchiveSummary>> GetArchiveSummariesAsync(CancellationToken cancellationToken = default)
+
     {
         const string sql = @"
 SELECT a.id,

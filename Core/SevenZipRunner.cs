@@ -1,11 +1,13 @@
 using System.ComponentModel;
 using System.Diagnostics;
-using Spectre.Console;
+using System.Text;
+using System.Text.RegularExpressions;
 
 namespace Vault.Core;
 
 public sealed class SevenZipRunner
 {
+    private static readonly Regex ProgressRegex = new(@"(?<!\d)(100|[1-9]?\d)%", RegexOptions.Compiled);
     private readonly string _sevenZipPath;
 
     public SevenZipRunner()
@@ -18,6 +20,7 @@ public sealed class SevenZipRunner
         string workingDirectory,
         IReadOnlyCollection<string> relativePaths,
         ArchiveCompressionOptions compressionOptions,
+        Action<int>? progressCallback = null,
         CancellationToken cancellationToken = default)
     {
         if (relativePaths.Count == 0)
@@ -38,12 +41,14 @@ public sealed class SevenZipRunner
                 "-t7z",
                 archivePath,
                 $"@{listFilePath}",
-                "-y"
+                "-y",
+                "-bb0",
+                "-bsp1"
             };
 
             AppendCompressionArguments(arguments, compressionOptions);
 
-            ProcessExecutionResult result = await RunProcessAsync(arguments, workingDirectory, cancellationToken);
+            ProcessExecutionResult result = await RunProcessAsync(arguments, workingDirectory, progressCallback, cancellationToken);
             if (result.ExitCode != 0)
             {
                 throw new InvalidOperationException($"7z 创建压缩包失败：{Environment.NewLine}{result.StandardError}");
@@ -51,8 +56,7 @@ public sealed class SevenZipRunner
         }
         catch (Win32Exception exception)
         {
-                        throw new InvalidOperationException($"无法启动 7z。Amber 当前解析到的 7z 路径为：{_sevenZipPath}。请确认环境变量 VAULT_7Z_PATH 指向正确的 7z 可执行文件，或确认启动 Amber 的同一个终端/进程环境里可以找到 7z。{exception.Message}", exception);
-
+            throw new InvalidOperationException($"无法启动 7z。Amber 当前解析到的 7z 路径为：{_sevenZipPath}。请确认环境变量 VAULT_7Z_PATH 指向正确的 7z 可执行文件，或确认启动 Amber 的同一个终端/进程环境里可以找到 7z。{exception.Message}", exception);
         }
         finally
         {
@@ -82,7 +86,7 @@ public sealed class SevenZipRunner
                 "-y"
             };
 
-            ProcessExecutionResult result = await RunProcessAsync(arguments, Directory.GetCurrentDirectory(), cancellationToken);
+            ProcessExecutionResult result = await RunProcessAsync(arguments, Directory.GetCurrentDirectory(), progressCallback: null, cancellationToken);
             if (result.ExitCode != 0)
             {
                 throw new InvalidOperationException($"7z 解压文件失败：{Environment.NewLine}{result.StandardError}");
@@ -90,12 +94,11 @@ public sealed class SevenZipRunner
         }
         catch (Win32Exception exception)
         {
-                        throw new InvalidOperationException($"无法启动 7z。Amber 当前解析到的 7z 路径为：{_sevenZipPath}。请确认环境变量 VAULT_7Z_PATH 指向正确的 7z 可执行文件，或确认启动 Amber 的同一个终端/进程环境里可以找到 7z。{exception.Message}", exception);
-
+            throw new InvalidOperationException($"无法启动 7z。Amber 当前解析到的 7z 路径为：{_sevenZipPath}。请确认环境变量 VAULT_7Z_PATH 指向正确的 7z 可执行文件，或确认启动 Amber 的同一个终端/进程环境里可以找到 7z。{exception.Message}", exception);
         }
     }
 
-        public async Task ExtractArchiveAsync(
+    public async Task ExtractArchiveAsync(
         string archivePath,
         string outputDirectory,
         CancellationToken cancellationToken = default)
@@ -112,7 +115,7 @@ public sealed class SevenZipRunner
                 "-y"
             };
 
-            ProcessExecutionResult result = await RunProcessAsync(arguments, Directory.GetCurrentDirectory(), cancellationToken);
+            ProcessExecutionResult result = await RunProcessAsync(arguments, Directory.GetCurrentDirectory(), progressCallback: null, cancellationToken);
             if (result.ExitCode != 0)
             {
                 throw new InvalidOperationException($"7z 解压归档失败：{Environment.NewLine}{result.StandardError}");
@@ -125,7 +128,6 @@ public sealed class SevenZipRunner
     }
 
     private static void AppendCompressionArguments(List<string> arguments, ArchiveCompressionOptions compressionOptions)
-
     {
         if (compressionOptions.IsStore)
         {
@@ -137,7 +139,7 @@ public sealed class SevenZipRunner
         arguments.Add("-ms=on");
         arguments.Add($"-mx={(int)compressionOptions.Level}");
 
-                if (!string.IsNullOrWhiteSpace(compressionOptions.DictionarySize))
+        if (!string.IsNullOrWhiteSpace(compressionOptions.DictionarySize))
         {
             arguments.Add($"-md={compressionOptions.DictionarySize.Trim()}");
         }
@@ -146,7 +148,6 @@ public sealed class SevenZipRunner
         {
             arguments.Add($"-mfb={compressionOptions.FastBytes.Value}");
         }
-
 
         if (!string.IsNullOrWhiteSpace(compressionOptions.MatchFinder))
         {
@@ -162,6 +163,7 @@ public sealed class SevenZipRunner
     private async Task<ProcessExecutionResult> RunProcessAsync(
         IReadOnlyList<string> arguments,
         string workingDirectory,
+        Action<int>? progressCallback,
         CancellationToken cancellationToken)
     {
         ProcessStartInfo startInfo = new()
@@ -190,8 +192,9 @@ public sealed class SevenZipRunner
             throw new InvalidOperationException("启动 7z 进程失败，系统没有返回有效的进程句柄。");
         }
 
-        Task<string> stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
-        Task<string> stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
+        Task<string> stdoutTask = ReadStreamAsync(process.StandardOutput, progressCallback, cancellationToken);
+        Task<string> stderrTask = ReadStreamAsync(process.StandardError, progressCallback: null, cancellationToken);
+
         await process.WaitForExitAsync(cancellationToken);
 
         string stdout = await stdoutTask;
@@ -205,7 +208,7 @@ public sealed class SevenZipRunner
         return new ProcessExecutionResult(process.ExitCode, stdout, stderr);
     }
 
-        private static string ResolveSevenZipPath()
+    private static string ResolveSevenZipPath()
     {
         string? configured = Environment.GetEnvironmentVariable("VAULT_7Z_PATH");
         if (!string.IsNullOrWhiteSpace(configured))
@@ -253,6 +256,72 @@ public sealed class SevenZipRunner
         return executableNames[0];
     }
 
+    private static async Task<string> ReadStreamAsync(
+        StreamReader reader,
+        Action<int>? progressCallback,
+        CancellationToken cancellationToken)
+    {
+        StringBuilder output = new();
+        char[] buffer = new char[256];
+        int lastReportedProgress = -1;
+        string progressWindow = string.Empty;
+
+        while (true)
+        {
+            int charsRead = await reader.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken);
+            if (charsRead == 0)
+            {
+                break;
+            }
+
+            output.Append(buffer, 0, charsRead);
+
+            if (progressCallback is null)
+            {
+                continue;
+            }
+
+            progressWindow = AppendProgressWindow(progressWindow, buffer, charsRead);
+            lastReportedProgress = ReportLatestProgress(progressWindow, lastReportedProgress, progressCallback);
+        }
+
+        return output.ToString();
+    }
+
+    private static string AppendProgressWindow(string currentWindow, char[] buffer, int charsRead)
+    {
+        string nextWindow = currentWindow + new string(buffer, 0, charsRead);
+        return nextWindow.Length <= 64 ? nextWindow : nextWindow[^64..];
+    }
+
+    private static int ReportLatestProgress(string progressWindow, int lastReportedProgress, Action<int> progressCallback)
+    {
+        MatchCollection matches = ProgressRegex.Matches(progressWindow);
+        int latestProgress = lastReportedProgress;
+
+        foreach (Match match in matches)
+        {
+            if (!match.Success || !int.TryParse(match.Groups[1].Value, out int parsedProgress))
+            {
+                continue;
+            }
+
+            if (parsedProgress <= latestProgress)
+            {
+                continue;
+            }
+
+            latestProgress = parsedProgress;
+        }
+
+        if (latestProgress > lastReportedProgress)
+        {
+            progressCallback(latestProgress);
+        }
+
+        return latestProgress;
+    }
+
     private static string? FindExecutableOnPath(string executableName)
     {
         string? pathValue = Environment.GetEnvironmentVariable("PATH");
@@ -287,7 +356,6 @@ public sealed class SevenZipRunner
 
         return null;
     }
-
 }
 
 public sealed class ProcessExecutionResult
@@ -305,4 +373,5 @@ public sealed class ProcessExecutionResult
 
     public string StandardError { get; }
 }
+
 

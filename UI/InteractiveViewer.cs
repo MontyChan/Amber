@@ -21,7 +21,7 @@ public sealed class InteractiveViewer
         await ShowPagedArchiveSelectionAsync(summaries, loadFilesAsync, exportTreeAsync, "Archives", "归档列表");
     }
 
-    public async Task ShowSearchResultsAsync(
+        public async Task ShowSearchResultsAsync(
         string keyword,
         IReadOnlyList<SearchResultItem> results,
         Func<long, Task<IReadOnlyList<ArchiveFile>>> loadFilesAsync,
@@ -33,8 +33,9 @@ public sealed class InteractiveViewer
             return;
         }
 
-        int pageSize = GetPageSize();
+        int pageSize = GetSearchPageSize();
         int pageIndex = 0;
+
 
         while (true)
         {
@@ -45,12 +46,15 @@ public sealed class InteractiveViewer
 
             List<SearchPromptChoice> archiveChoices = BuildPagedSearchArchiveChoices(page, results);
             List<SearchPromptChoice> pagedChoices = BuildPagedSearchChoices(pageIndex, results.Count, pageSize, archiveChoices);
-            SearchPromptChoice selection = AnsiConsole.Prompt(
+                                    SearchPromptChoice selection = AnsiConsole.Prompt(
                 new SelectionPrompt<SearchPromptChoice>()
                     .Title(CreatePromptTitle("Select an archive to continue, or change page", "选择归档继续，或切换分页"))
                     .PageSize(Math.Min(Math.Max(pagedChoices.Count, 3), 15))
+                    .MoreChoicesText(CreateMoreChoicesText())
                     .UseConverter(choice => choice.DisplayText)
                     .AddChoices(pagedChoices));
+
+
 
             if (selection.Kind == SearchChoiceKind.Back)
             {
@@ -93,12 +97,15 @@ public sealed class InteractiveViewer
             AnsiConsole.Write(table);
 
             List<ArchivePromptChoice> pagedChoices = BuildPagedArchiveChoices(page, pageIndex, summaries.Count, pageSize);
-            ArchivePromptChoice selection = AnsiConsole.Prompt(
+                                    ArchivePromptChoice selection = AnsiConsole.Prompt(
                 new SelectionPrompt<ArchivePromptChoice>()
                     .Title(CreatePromptTitle("Select an archive to continue, or change page", "选择归档继续，或切换分页"))
                     .PageSize(Math.Min(Math.Max(pagedChoices.Count, 3), 15))
+                    .MoreChoicesText(CreateMoreChoicesText())
                     .UseConverter(choice => choice.DisplayText)
                     .AddChoices(pagedChoices));
+
+
 
             if (selection.Kind == ArchiveChoiceKind.Back)
             {
@@ -129,7 +136,7 @@ public sealed class InteractiveViewer
     {
         while (true)
         {
-            List<ArchiveActionChoice> choices = new()
+                                    List<ArchiveActionChoice> choices = new()
             {
                 new ArchiveActionChoice(ArchiveActionKind.ViewTree, PlainLabel("View file tree", "查看文件树"))
             };
@@ -141,13 +148,17 @@ public sealed class InteractiveViewer
 
             choices.Add(new ArchiveActionChoice(ArchiveActionKind.Back, PlainLabel("Back", "返回上一级")));
 
+
             AnsiConsole.Clear();
-            ArchiveActionChoice action = AnsiConsole.Prompt(
+                        ArchiveActionChoice action = AnsiConsole.Prompt(
                 new SelectionPrompt<ArchiveActionChoice>()
                     .Title(CreatePromptTitle($"Archive #{archiveId}", $"归档 #{archiveId}"))
                     .PageSize(Math.Min(Math.Max(choices.Count, 3), 8))
+                    .MoreChoicesText(CreateMoreChoicesText())
                     .UseConverter(choice => choice.DisplayText)
                     .AddChoices(choices));
+
+
 
             if (action.Kind == ArchiveActionKind.Back)
             {
@@ -236,20 +247,28 @@ public sealed class InteractiveViewer
             .Select(summary => new ArchivePromptChoice(
                 ArchiveChoiceKind.View,
                 summary.Id,
-                PlainLabel($"Open Archive #{summary.Id} ({summary.FileCount} files)", $"打开归档 #{summary.Id}（{summary.FileCount} 个文件）")))
+                                                PlainLabel($"Open Archive #{summary.Id} ({summary.FileCount} files)", $"打开归档 #{summary.Id}（{summary.FileCount} 个文件）")))
+
+
             .ToList();
 
         if (pageIndex > 0)
         {
-            choices.Add(new ArchivePromptChoice(ArchiveChoiceKind.PreviousPage, 0, PlainLabel("Previous page", "上一页")));
+                                    choices.Add(new ArchivePromptChoice(ArchiveChoiceKind.PreviousPage, 0, PlainLabel("Previous page", "上一页")));
+
+
         }
 
         if (pageIndex < GetLastPageIndex(totalCount, pageSize))
         {
-            choices.Add(new ArchivePromptChoice(ArchiveChoiceKind.NextPage, 0, PlainLabel("Next page", "下一页")));
+                                    choices.Add(new ArchivePromptChoice(ArchiveChoiceKind.NextPage, 0, PlainLabel("Next page", "下一页")));
+
+
         }
 
-        choices.Add(new ArchivePromptChoice(ArchiveChoiceKind.Back, 0, PlainLabel("Back", "返回上一级")));
+                        choices.Add(new ArchivePromptChoice(ArchiveChoiceKind.Back, 0, PlainLabel("Back", "返回上一级")));
+
+
         return choices;
     }
 
@@ -263,15 +282,21 @@ public sealed class InteractiveViewer
 
         if (pageIndex > 0)
         {
-            choices.Add(new SearchPromptChoice(SearchChoiceKind.PreviousPage, 0, PlainLabel("Previous page", "上一页")));
+                                    choices.Add(new SearchPromptChoice(SearchChoiceKind.PreviousPage, 0, PlainLabel("Previous page", "上一页")));
+
+
         }
 
         if (pageIndex < GetLastPageIndex(totalCount, pageSize))
         {
-            choices.Add(new SearchPromptChoice(SearchChoiceKind.NextPage, 0, PlainLabel("Next page", "下一页")));
+                                    choices.Add(new SearchPromptChoice(SearchChoiceKind.NextPage, 0, PlainLabel("Next page", "下一页")));
+
+
         }
 
-        choices.Add(new SearchPromptChoice(SearchChoiceKind.Back, 0, PlainLabel("Back", "返回上一级")));
+                        choices.Add(new SearchPromptChoice(SearchChoiceKind.Back, 0, PlainLabel("Back", "返回上一级")));
+
+
         return choices;
     }
 
@@ -288,7 +313,9 @@ public sealed class InteractiveViewer
                 return new SearchPromptChoice(
                     SearchChoiceKind.ViewArchive,
                     group.Key,
-                    PlainLabel($"Open Archive #{group.Key} ({group.Count()} matches)", $"打开归档 #{group.Key}（{group.Count()} 条匹配）"));
+                                                            PlainLabel($"Open Archive #{group.Key} ({group.Count()} matches)", $"打开归档 #{group.Key}（{group.Count()} 条匹配）"));
+
+
             })
             .OrderBy(choice => choice.ArchiveId)
             .ToList();
@@ -353,13 +380,19 @@ public sealed class InteractiveViewer
         }
     }
 
-    private static int GetPageSize()
+        private static int GetPageSize()
     {
         int availableHeight = Math.Max(Console.WindowHeight - 12, 5);
         return Math.Min(availableHeight, 12);
     }
 
+    private static int GetSearchPageSize()
+    {
+        return Math.Max(GetPageSize() - 5, 5);
+    }
+
     private static int GetLastPageIndex(int totalCount, int pageSize)
+
     {
         return Math.Max((int)Math.Ceiling(totalCount / (double)pageSize) - 1, 0);
     }
@@ -389,12 +422,19 @@ public sealed class InteractiveViewer
         return $"{current:0.##} {units[unitIndex]}";
     }
 
-    private static string PlainLabel(string english, string chinese)
+            private static string PlainLabel(string english, string chinese)
     {
         return $"{english}\n{chinese}";
     }
 
+    private static string CreateMoreChoicesText()
+    {
+        return "[grey](Use ↑/↓/Home/End to navigate; press End for Back / 可用 ↑/↓/Home/End 导航，按 End 可快速到底部返回)[/]";
+    }
+
     private static string MarkupLabel(string english, string chinese, string englishColor = "cyan")
+
+
     {
         return $"[{englishColor}]{Markup.Escape(english)}[/]\n[grey]{Markup.Escape(chinese)}[/]";
     }

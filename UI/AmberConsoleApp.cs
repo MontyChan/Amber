@@ -20,7 +20,6 @@ public sealed class AmberConsoleApp
     {
     }
 
-
     public async Task RunMainMenuAsync()
 
     {
@@ -149,14 +148,16 @@ public sealed class AmberConsoleApp
 
                 bool includeHighEntropyFilesInCompression = AskYesNo("Compress high-entropy files too?", "压缩是否包括高熵文件？");
 
-        try
+                try
         {
             ArchiveSession session = new(_repository);
             long archiveId = await session.RunAsync(directory, note, tags, compressionOptions, includeHighEntropyFilesInCompression);
 
+            AnsiConsole.WriteLine();
             WriteSuccessLine($"Archive created successfully: #{archiveId}", $"归档成功：#{archiveId}");
             AnsiConsole.MarkupLine($"[cyan]{Markup.Escape(_repository.ArchiveOutputDirectory)}[/]");
         }
+
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             WriteErrorLine("Archive failed", $"归档失败：{exception.Message}");
@@ -167,15 +168,22 @@ public sealed class AmberConsoleApp
 
         private async Task RunListFlowAsync()
     {
-        try
+                try
         {
             InteractiveViewer viewer = new();
             IReadOnlyList<ArchiveSummary> summaries = await _repository.GetArchiveSummariesAsync();
+            if (summaries.Count == 0)
+            {
+                WriteWarningLine("No archive records yet.", "当前还没有归档记录。", waitForInput: true);
+                return;
+            }
+
             await viewer.ShowArchiveListAsync(
                 summaries,
                 archiveId => _repository.GetArchiveFilesAsync(archiveId),
                 ExportPlaceholderTreeAsync);
         }
+
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             WriteErrorLine("Failed to load archives", $"读取归档列表失败：{exception.Message}");
@@ -196,16 +204,23 @@ public sealed class AmberConsoleApp
             return;
         }
 
-        try
+                try
         {
             InteractiveViewer viewer = new();
             IReadOnlyList<SearchResultItem> results = await _repository.SearchAsync(keyword);
+            if (results.Count == 0)
+            {
+                WriteWarningLine($"No results for keyword {keyword}.", "没有找到相关结果。", waitForInput: true);
+                return;
+            }
+
             await viewer.ShowSearchResultsAsync(
                 keyword,
                 results,
                 archiveId => _repository.GetArchiveFilesAsync(archiveId),
                 ExportPlaceholderTreeAsync);
         }
+
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             WriteErrorLine("Search failed", $"搜索失败：{exception.Message}");
@@ -215,115 +230,128 @@ public sealed class AmberConsoleApp
 
 
             private async Task RunExtractFlowAsync()
-    {
-        AnsiConsole.Clear();
-        ShowFlowHeader("Extract Files", "解压文件");
-
-        try
-        {
-            IReadOnlyList<ArchiveSummary> summaries = await _repository.GetArchiveSummariesAsync();
-            if (summaries.Count == 0)
             {
-                WriteWarningLine("No archive records yet.", "当前还没有归档记录。", waitForInput: true);
-                return;
-            }
+                AnsiConsole.Clear();
+                ShowFlowHeader("Extract Files", "解压文件");
 
-            ArchiveSummary? selectedArchive = SelectArchiveSummaryOrBack(summaries);
-            if (selectedArchive is null)
-            {
-                return;
-            }
-
-            Archive? archive = await _repository.GetArchiveByIdAsync(selectedArchive.Id);
-            if (archive is null)
-            {
-                throw new InvalidOperationException($"Archive #{selectedArchive.Id} was not found / 未找到归档 #{selectedArchive.Id}。");
-            }
-
-            ExtractModeChoice mode = AnsiConsole.Prompt(
-                new SelectionPrompt<ExtractModeChoice>()
-                    .Title(CreatePromptTitle("Choose extract mode", "选择解压方式"))
-                    .PageSize(5)
-                    .UseConverter(choice => choice.DisplayText)
-                    .AddChoices(new[]
-                    {
-                        new ExtractModeChoice(ExtractMode.AllFiles, PlainLabel("Extract all files", "全部解压")),
-                        new ExtractModeChoice(ExtractMode.SingleFile, PlainLabel("Choose one file", "选择单个文件")),
-                        new ExtractModeChoice(ExtractMode.Back, PlainLabel("Back", "返回上一级"))
-                    }));
-
-            if (mode.Mode == ExtractMode.Back)
-            {
-                return;
-            }
-
-            if (mode.Mode == ExtractMode.AllFiles)
-            {
-                string? outputDirectory = AskRequiredTextOrBack("Output directory", "输出目录");
-                if (outputDirectory is null)
+                try
                 {
-                    return;
+                    IReadOnlyList<ArchiveSummary> summaries = await _repository.GetArchiveSummariesAsync();
+                    if (summaries.Count == 0)
+                    {
+                        WriteWarningLine("No archive records yet.", "当前还没有归档记录。", waitForInput: true);
+                        return;
+                    }
+
+                    while (true)
+                    {
+                        ArchiveSummary? selectedArchive = SelectArchiveSummaryOrBack(summaries);
+                        if (selectedArchive is null)
+                        {
+                            return;
+                        }
+
+                        Archive? archive = await _repository.GetArchiveByIdAsync(selectedArchive.Id);
+                        if (archive is null)
+                        {
+                            throw new InvalidOperationException($"Archive #{selectedArchive.Id} was not found / 未找到归档 #{selectedArchive.Id}。");
+                        }
+
+                        while (true)
+                        {
+                            ExtractModeChoice mode = AnsiConsole.Prompt(
+                                new SelectionPrompt<ExtractModeChoice>()
+                                    .Title(CreatePromptTitle("Choose extract mode", "选择解压方式"))
+                                    .PageSize(5)
+                                    .MoreChoicesText(CreateMoreChoicesText())
+                                    .UseConverter(choice => choice.DisplayText)
+                                    .AddChoices(new[]
+                                    {
+                                        new ExtractModeChoice(ExtractMode.AllFiles, PlainLabel("Extract all files", "全部解压")),
+                                        new ExtractModeChoice(ExtractMode.SingleFile, PlainLabel("Choose one file", "选择单个文件")),
+                                        new ExtractModeChoice(ExtractMode.Back, PlainLabel("Back", "返回上一级"))
+                                    }));
+
+                            if (mode.Mode == ExtractMode.Back)
+                            {
+                                break;
+                            }
+
+                            if (mode.Mode == ExtractMode.AllFiles)
+                            {
+                                string? outputDirectory = AskRequiredTextOrBack("Output directory", "输出目录");
+                                if (outputDirectory is null)
+                                {
+                                    continue;
+                                }
+
+                                await ExtractAllArchivePackagesAsync(archive, Path.GetFullPath(outputDirectory));
+                                WriteSuccessLine("All files extracted", $"全部解压完成：Archive #{selectedArchive.Id}");
+                                WaitForReturn();
+                                return;
+                            }
+
+                            IReadOnlyList<ArchiveFile> files = await _repository.GetArchiveFilesAsync(selectedArchive.Id);
+                            if (files.Count == 0)
+                            {
+                                WriteWarningLine("This archive has no files.", "该归档没有文件。", waitForInput: true);
+                                break;
+                            }
+
+                            while (true)
+                            {
+                                string? filterKeyword = AskOptionalTextOrBack("Filter keyword (optional)", "筛选关键词（可选）");
+                                if (filterKeyword == BackKeyword)
+                                {
+                                    break;
+                                }
+
+                                IReadOnlyList<ArchiveFile> filteredFiles = string.IsNullOrWhiteSpace(filterKeyword)
+                                    ? files
+                                    : files.Where(file => file.RelativePath.Contains(filterKeyword, StringComparison.OrdinalIgnoreCase)).ToList();
+
+                                if (filteredFiles.Count == 0)
+                                {
+                                    WriteWarningLine("No files matched the filter.", "没有匹配筛选条件的文件。", waitForInput: true);
+                                    continue;
+                                }
+
+                                ArchiveFile? selectedFile = SelectArchiveFileOrBack(selectedArchive.Id, filteredFiles);
+                                if (selectedFile is null)
+                                {
+                                    continue;
+                                }
+
+                                string? singleOutputDirectory = AskRequiredTextOrBack("Output directory", "输出目录");
+                                if (singleOutputDirectory is null)
+                                {
+                                    continue;
+                                }
+
+                                string normalizedRelativePath = selectedFile.RelativePath.Replace(Path.DirectorySeparatorChar, '/').Replace(Path.AltDirectorySeparatorChar, '/');
+                                string? packagePath = selectedFile.IsStored ? archive.StoredPath : archive.CompressedPath;
+                                if (string.IsNullOrWhiteSpace(packagePath) || !File.Exists(packagePath))
+                                {
+                                    throw new InvalidOperationException($"Archive package is missing / 归档包不存在：{packagePath ?? "<empty>"}");
+                                }
+
+                                SevenZipRunner runner = new();
+                                await runner.ExtractSingleFileAsync(packagePath, FileSorter.ToArchiveEntryPath(normalizedRelativePath), Path.GetFullPath(singleOutputDirectory));
+                                WriteSuccessLine("Extraction completed", $"解压完成：{normalizedRelativePath}");
+                                WaitForReturn();
+                                return;
+                            }
+                        }
+                    }
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    WriteErrorLine("Extraction failed", $"解压失败：{exception.Message}");
                 }
 
-                await ExtractAllArchivePackagesAsync(archive, Path.GetFullPath(outputDirectory));
-                WriteSuccessLine("All files extracted", $"全部解压完成：Archive #{selectedArchive.Id}");
                 WaitForReturn();
-                return;
             }
 
-            IReadOnlyList<ArchiveFile> files = await _repository.GetArchiveFilesAsync(selectedArchive.Id);
-            if (files.Count == 0)
-            {
-                WriteWarningLine("This archive has no files.", "该归档没有文件。", waitForInput: true);
-                return;
-            }
-
-            string? filterKeyword = AskOptionalTextOrBack("Filter keyword (optional)", "筛选关键词（可选）");
-            if (filterKeyword == BackKeyword)
-            {
-                return;
-            }
-
-            IReadOnlyList<ArchiveFile> filteredFiles = string.IsNullOrWhiteSpace(filterKeyword)
-                ? files
-                : files.Where(file => file.RelativePath.Contains(filterKeyword, StringComparison.OrdinalIgnoreCase)).ToList();
-
-            if (filteredFiles.Count == 0)
-            {
-                WriteWarningLine("No files matched the filter.", "没有匹配筛选条件的文件。", waitForInput: true);
-                return;
-            }
-
-            ArchiveFile? selectedFile = SelectArchiveFileOrBack(selectedArchive.Id, filteredFiles);
-            if (selectedFile is null)
-            {
-                return;
-            }
-
-            string? singleOutputDirectory = AskRequiredTextOrBack("Output directory", "输出目录");
-            if (singleOutputDirectory is null)
-            {
-                return;
-            }
-
-            string normalizedRelativePath = selectedFile.RelativePath.Replace(Path.DirectorySeparatorChar, '/').Replace(Path.AltDirectorySeparatorChar, '/');
-            string? packagePath = selectedFile.IsStored ? archive.StoredPath : archive.CompressedPath;
-            if (string.IsNullOrWhiteSpace(packagePath) || !File.Exists(packagePath))
-            {
-                throw new InvalidOperationException($"Archive package is missing / 归档包不存在：{packagePath ?? "<empty>"}");
-            }
-
-            SevenZipRunner runner = new();
-            await runner.ExtractSingleFileAsync(packagePath, FileSorter.ToArchiveEntryPath(normalizedRelativePath), Path.GetFullPath(singleOutputDirectory));
-            WriteSuccessLine("Extraction completed", $"解压完成：{normalizedRelativePath}");
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            WriteErrorLine("Extraction failed", $"解压失败：{exception.Message}");
-        }
-
-        WaitForReturn();
-    }
 
     private static async Task ExtractAllArchivePackagesAsync(Archive archive, string outputDirectory)
     {
@@ -375,10 +403,12 @@ public sealed class AmberConsoleApp
 
     private static ArchiveSummary? SelectArchiveSummaryOrBack(IReadOnlyList<ArchiveSummary> summaries)
     {
-        SelectionPrompt<ArchiveSummaryChoice> prompt = new SelectionPrompt<ArchiveSummaryChoice>()
+                SelectionPrompt<ArchiveSummaryChoice> prompt = new SelectionPrompt<ArchiveSummaryChoice>()
             .Title(CreatePromptTitle("Choose an archive", "选择一个归档"))
             .PageSize(Math.Min(Math.Max(summaries.Count + 1, 3), 15))
+            .MoreChoicesText(CreateMoreChoicesText())
             .UseConverter(choice => choice.DisplayText);
+
 
                 foreach (ArchiveSummary summary in summaries)
 
@@ -395,10 +425,12 @@ public sealed class AmberConsoleApp
 
     private static ArchiveFile? SelectArchiveFileOrBack(long archiveId, IReadOnlyList<ArchiveFile> files)
     {
-        SelectionPrompt<ArchiveFileChoice> prompt = new SelectionPrompt<ArchiveFileChoice>()
+                SelectionPrompt<ArchiveFileChoice> prompt = new SelectionPrompt<ArchiveFileChoice>()
             .Title(CreatePromptTitle($"Choose a file from Archive #{archiveId}", $"从归档 #{archiveId} 选择文件"))
             .PageSize(15)
+            .MoreChoicesText(CreateMoreChoicesText())
             .UseConverter(choice => choice.DisplayText);
+
 
                 foreach (ArchiveFile file in files)
 
@@ -436,12 +468,14 @@ public sealed class AmberConsoleApp
 
             AnsiConsole.Write(currentPaths);
 
-            StorageSettingChoice selection = AnsiConsole.Prompt(
+                        StorageSettingChoice selection = AnsiConsole.Prompt(
                 new SelectionPrompt<StorageSettingChoice>()
                     .Title(CreatePromptTitle("Choose one item to change", "选择一项进行修改"))
                     .PageSize(5)
+                    .MoreChoicesText(CreateMoreChoicesText())
                     .UseConverter(choice => choice.DisplayText)
                     .AddChoices(new[]
+
                     {
                         new StorageSettingChoice(StorageSettingAction.ArchiveOutput, PlainLabel("Change archive output directory", "修改归档输出目录")),
                         new StorageSettingChoice(StorageSettingAction.DatabasePath, PlainLabel("Change database file path", "修改数据库文件路径")),
@@ -608,12 +642,14 @@ public sealed class AmberConsoleApp
 
     private static ArchiveCompressionOptions? AskCompressionOptionsOrBack()
     {
-        CompressionLevelChoice levelChoice = AnsiConsole.Prompt(
+                CompressionLevelChoice levelChoice = AnsiConsole.Prompt(
             new SelectionPrompt<CompressionLevelChoice>()
                 .Title(CreatePromptTitle("Choose compression level", "选择压缩等级"))
                 .PageSize(8)
+                .MoreChoicesText(CreateMoreChoicesText())
                 .UseConverter(choice => choice.DisplayText)
                 .AddChoices(GetCompressionLevelChoices()));
+
 
         if (levelChoice.Level is null)
         {
@@ -637,12 +673,14 @@ public sealed class AmberConsoleApp
             return null;
         }
 
-        MatchFinderChoice matchFinderChoice = AnsiConsole.Prompt(
+                MatchFinderChoice matchFinderChoice = AnsiConsole.Prompt(
             new SelectionPrompt<MatchFinderChoice>()
                 .Title(CreatePromptTitle("Choose match finder", "选择匹配器"))
                 .PageSize(6)
+                .MoreChoicesText(CreateMoreChoicesText())
                 .UseConverter(choice => choice.DisplayText)
                 .AddChoices(new[]
+
                 {
                     new MatchFinderChoice(null, PlainLabel("Keep default", "保持默认")),
                     new MatchFinderChoice("bt2", PlainLabel("bt2", "bt2")),
@@ -687,41 +725,40 @@ public sealed class AmberConsoleApp
         };
     }
 
-    private static string? AskOptionalTextOrBack(string englishPrompt, string chinesePrompt)
-    {
-        string value = AnsiConsole.Prompt(
-            new TextPrompt<string>($"{CreatePromptTitle(englishPrompt, chinesePrompt)}\n[grey]Press Enter to skip. Type [yellow]{BackKeyword}[/] to return.[/]\n[grey]可直接回车跳过。输入 [yellow]{BackKeyword}[/] 返回。[/]")
-                .AllowEmpty());
-
-        if (value.Equals(BackKeyword, StringComparison.OrdinalIgnoreCase))
+                                private static string? AskOptionalTextOrBack(string englishPrompt, string chinesePrompt)
         {
-            return BackKeyword;
-        }
+            AnsiConsole.MarkupLine(CreatePromptTitle(englishPrompt, chinesePrompt));
 
-        return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
-    }
-
-    private static string? AskRequiredTextOrBack(string englishPrompt, string chinesePrompt)
-    {
-        while (true)
-        {
-            string value = AnsiConsole.Prompt(
-                new TextPrompt<string>($"{CreatePromptTitle(englishPrompt, chinesePrompt)}\n[grey]Type [yellow]{BackKeyword}[/] to return.[/]\n[grey]输入 [yellow]{BackKeyword}[/] 返回。[/]")
-                    .AllowEmpty());
-
+            string value = ReadEditableInput();
             if (value.Equals(BackKeyword, StringComparison.OrdinalIgnoreCase))
             {
-                return null;
+                return BackKeyword;
             }
 
-            if (!string.IsNullOrWhiteSpace(value))
-            {
-                return value.Trim();
-            }
-
-            WriteWarningLine("This field cannot be empty.", "该字段不能为空。");
+            return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
         }
-    }
+
+        private static string? AskRequiredTextOrBack(string englishPrompt, string chinesePrompt)
+        {
+            while (true)
+            {
+                AnsiConsole.MarkupLine(CreatePromptTitle(englishPrompt, chinesePrompt));
+
+                string value = ReadEditableInput();
+                if (value.Equals(BackKeyword, StringComparison.OrdinalIgnoreCase))
+                {
+                    return null;
+                }
+
+                if (!string.IsNullOrWhiteSpace(value))
+                {
+                    return value.Trim();
+                }
+
+                WriteWarningLine("This field cannot be empty.", "该字段不能为空。");
+            }
+        }
+
 
     private static long? AskRequiredLongOrBack(string englishPrompt, string chinesePrompt)
     {
@@ -768,12 +805,14 @@ public sealed class AmberConsoleApp
 
         private static bool AskYesNo(string englishPrompt, string chinesePrompt)
         {
-            ConfirmationChoice action = AnsiConsole.Prompt(
+                        ConfirmationChoice action = AnsiConsole.Prompt(
                 new SelectionPrompt<ConfirmationChoice>()
                     .Title(CreatePromptTitle(englishPrompt, chinesePrompt))
                     .PageSize(4)
+                    .MoreChoicesText(CreateMoreChoicesText())
                     .UseConverter(choice => choice.DisplayText)
                     .AddChoices(new[]
+
                     {
                         new ConfirmationChoice(ConfirmationAction.Migrate, PlainLabel("Yes", "是")),
                         new ConfirmationChoice(ConfirmationAction.Back, PlainLabel("No", "否"))
@@ -813,18 +852,22 @@ public sealed class AmberConsoleApp
 
     private static void WaitForReturn()
     {
+                AnsiConsole.WriteLine();
         WriteMutedLine("Press any key to continue", "按任意键继续");
         Console.ReadKey(intercept: true);
+
     }
 
     private static bool ConfirmStorageMigration(string englishTitle, string chineseTitle)
     {
-        ConfirmationChoice action = AnsiConsole.Prompt(
+                ConfirmationChoice action = AnsiConsole.Prompt(
             new SelectionPrompt<ConfirmationChoice>()
                 .Title(CreatePromptTitle(englishTitle, chineseTitle))
                 .PageSize(4)
+                .MoreChoicesText(CreateMoreChoicesText())
                 .UseConverter(choice => choice.DisplayText)
                 .AddChoices(new[]
+
                 {
                     new ConfirmationChoice(ConfirmationAction.Migrate, PlainLabel("Copy to the new path, then remove the old file when safe", "先复制到新路径，安全后再删除旧文件")),
                     new ConfirmationChoice(ConfirmationAction.Back, PlainLabel("Back", "返回上一级"))
@@ -838,14 +881,153 @@ public sealed class AmberConsoleApp
         return Path.GetFullPath(Environment.ExpandEnvironmentVariables(value.Trim().Trim('"')));
     }
 
-    private static string? NormalizeOptionalPromptValue(string? value)
+        private static string? NormalizeOptionalPromptValue(string? value)
     {
         return string.IsNullOrWhiteSpace(value) || string.Equals(value, BackKeyword, StringComparison.OrdinalIgnoreCase)
             ? null
             : value.Trim();
     }
 
+        private static string ReadEditableInput()
+        {
+            AnsiConsole.Markup("[deepskyblue1]>[/] ");
+
+            List<char> buffer = new();
+
+        int cursorIndex = 0;
+        int promptLeft = Console.CursorLeft;
+        int promptTop = Console.CursorTop;
+        int renderedWidth = 0;
+
+        while (true)
+        {
+            ConsoleKeyInfo key = Console.ReadKey(intercept: true);
+
+            switch (key.Key)
+            {
+                case ConsoleKey.Enter:
+                    Console.WriteLine();
+                    return new string(buffer.ToArray());
+                case ConsoleKey.LeftArrow:
+                    if (cursorIndex > 0)
+                    {
+                        cursorIndex--;
+                        SetEditableCursorPosition(buffer, cursorIndex, promptLeft, promptTop);
+                    }
+                    break;
+                case ConsoleKey.RightArrow:
+                    if (cursorIndex < buffer.Count)
+                    {
+                        cursorIndex++;
+                        SetEditableCursorPosition(buffer, cursorIndex, promptLeft, promptTop);
+                    }
+                    break;
+                case ConsoleKey.Home:
+                    cursorIndex = 0;
+                    SetEditableCursorPosition(buffer, cursorIndex, promptLeft, promptTop);
+                    break;
+                case ConsoleKey.End:
+                    cursorIndex = buffer.Count;
+                    SetEditableCursorPosition(buffer, cursorIndex, promptLeft, promptTop);
+                    break;
+                case ConsoleKey.Backspace:
+                    if (cursorIndex > 0)
+                    {
+                        buffer.RemoveAt(cursorIndex - 1);
+                        cursorIndex--;
+                        RedrawEditableInput(buffer, cursorIndex, promptLeft, promptTop, ref renderedWidth);
+                    }
+                    break;
+                case ConsoleKey.Delete:
+                    if (cursorIndex < buffer.Count)
+                    {
+                        buffer.RemoveAt(cursorIndex);
+                        RedrawEditableInput(buffer, cursorIndex, promptLeft, promptTop, ref renderedWidth);
+                    }
+                    break;
+                default:
+                    if (!char.IsControl(key.KeyChar))
+                    {
+                        buffer.Insert(cursorIndex, key.KeyChar);
+                        cursorIndex++;
+                        RedrawEditableInput(buffer, cursorIndex, promptLeft, promptTop, ref renderedWidth);
+                    }
+                    break;
+            }
+        }
+    }
+
+    private static void RedrawEditableInput(List<char> buffer, int cursorIndex, int promptLeft, int promptTop, ref int renderedWidth)
+    {
+        string text = new(buffer.ToArray());
+        int currentWidth = GetDisplayWidth(text);
+        int clearWidth = Math.Max(renderedWidth, currentWidth) + 1;
+
+        Console.SetCursorPosition(promptLeft, promptTop);
+        Console.Write(text);
+
+        if (clearWidth > currentWidth)
+        {
+            Console.Write(new string(' ', clearWidth - currentWidth));
+        }
+
+        renderedWidth = currentWidth;
+        SetEditableCursorPosition(buffer, cursorIndex, promptLeft, promptTop);
+    }
+
+    private static void SetEditableCursorPosition(List<char> buffer, int cursorIndex, int promptLeft, int promptTop)
+    {
+        int displayOffset = GetDisplayWidthUpTo(buffer, cursorIndex);
+        Console.SetCursorPosition(promptLeft + displayOffset, promptTop);
+    }
+
+    private static int GetDisplayWidthUpTo(List<char> buffer, int length)
+    {
+        return GetDisplayWidth(new string(buffer.Take(length).ToArray()));
+    }
+
+    private static int GetDisplayWidth(string value)
+    {
+        int width = 0;
+
+        foreach (char character in value)
+        {
+            width += GetCharDisplayWidth(character);
+        }
+
+        return width;
+    }
+
+    private static int GetCharDisplayWidth(char character)
+    {
+        if (char.IsControl(character))
+        {
+            return 0;
+        }
+
+        if (IsWideCharacter(character))
+        {
+            return 2;
+        }
+
+        return 1;
+    }
+
+    private static bool IsWideCharacter(char character)
+    {
+        return character is >= '\u1100' and <= '\u115F'
+            or >= '\u2E80' and <= '\uA4CF'
+            or >= '\uAC00' and <= '\uD7A3'
+            or >= '\uF900' and <= '\uFAFF'
+            or >= '\uFE10' and <= '\uFE19'
+            or >= '\uFE30' and <= '\uFE6F'
+            or >= '\uFF00' and <= '\uFF60'
+            or >= '\uFFE0' and <= '\uFFE6';
+    }
+
+
             private static void ResetScreen()
+
     {
         try
         {
@@ -913,7 +1095,14 @@ public sealed class AmberConsoleApp
         return $"{english}\n{chinese}";
     }
 
+    private static string CreateMoreChoicesText()
+    {
+        return "[grey](Use ↑/↓/Home/End to navigate; press End for Back / 可用 ↑/↓/Home/End 导航，按 End 可快速到底部返回)[/]";
+    }
+
+
     private static string MarkupLabel(string english, string chinese)
+
     {
         if (string.IsNullOrEmpty(chinese))
         {
