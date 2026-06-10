@@ -1,42 +1,47 @@
 # Amber
 
-Seal it in amber, and leave it at that.
+A structured local archive and retrieval tool for cold data
 
-Amber is a local cold-archive CLI/TUI for directories you want to keep, index, and recover later. It uses 7z for archive packages and SQLite for metadata indexing, so archived folders stay searchable instead of disappearing into opaque compressed blobs.
+Amber is a CLI/TUI application for local cold-archive workflows. It uses 7z to create archive packages and SQLite to persist archive metadata and file indexes, so archived directories remain searchable, browsable, inspectable, and recoverable after they leave the active working set.
 
 [中文](./README.zh-CN.md)
 
 ## Overview
 
-Amber is designed for folders that are no longer active, but still worth keeping around: old projects, exported photo libraries, archived documents, offline handoff materials, or anything else you do not want in the working set anymore.
+Amber is intended for directories that are no longer part of day-to-day work but still need to be retained and accessed later, such as legacy projects, archived documents, exported datasets, offline handoff materials, or photo and media backups.
 
-It combines:
+The project combines:
 
-- archive creation with 7z
-- metadata indexing with SQLite
-- terminal workflows for browsing, searching, and extraction
+- archive packaging with 7z
+- external metadata indexing with SQLite
+- terminal workflows for browsing, searching, exporting structure, and restoring files
+
+Instead of treating an archive as a compressed blob with no practical index, Amber keeps package data and metadata separate. That makes it possible to search across archived material without opening each archive package individually.
 
 ## Features
 
 - CLI and interactive TUI
-- 7z-based archive creation
-- SQLite metadata index with Dapper
+- 7z-based directory archiving
+- external SQLite index powered by Dapper
 - separate compressed and stored archive packages
-- single-file extraction and full extraction
-- file-path and note search
-- 0 KB placeholder tree export
+- single-file extraction and full archive restoration
+- search by file path or archive note
+- 0 KB placeholder tree export for structure preview
 - configurable database and archive output paths
+- archive package and database path migration
 - optional advanced compression settings
 - bilingual terminal interface in English and Chinese
 
 ## How It Works
 
-Each archive run produces up to two `.7z` packages:
+Each archive operation can produce up to two `.7z` packages:
 
 - a compressed package for files that still benefit from compression
-- a stored package for already-compressed or high-entropy files
+- a stored package for already-compressed or high-entropy files, avoiding unnecessary recompression overhead
 
-Archive metadata is stored outside the package in SQLite. That makes it practical to search across many archives without enumerating archive contents every time.
+By default, common pre-compressed formats are routed into the stored package. With `--compress-high-entropy`, those files can also be included in the compressed package.
+
+Archive metadata, file paths, notes, and tags are persisted in SQLite rather than embedded inside the archive package. This allows archive records to be listed, searched, inspected, and restored without mounting or enumerating package contents first.
 
 Default storage root:
 
@@ -132,18 +137,18 @@ dotnet run -- extract 12 --file "docs/report.pdf" --out "D:\Restore"
 
 ## Typical Workflow
 
-- archive a directory with a note and tags
-- browse or search the recorded index later
-- inspect structure with a placeholder tree if needed
-- extract one file or restore the full archive to an output directory
+- create an archive for a target directory and add notes or tags
+- browse recorded archive entries or run keyword searches later
+- export a placeholder tree when the directory structure needs to be reviewed
+- restore a single file or extract the full archive when needed
 
 ## TUI
 
-The TUI supports:
+The interactive interface supports:
 
 - archive creation
 - archive browsing
-- search
+- archive search
 - single-file extraction
 - full extraction
 - placeholder tree export
@@ -152,3 +157,4 @@ The TUI supports:
 ## License
 
 Licensed under the Apache License, Version 2.0. See `LICENSE` for details.
+
