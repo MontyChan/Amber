@@ -2,7 +2,9 @@
 
 A structured local archive and retrieval tool for cold data
 
-Amber is a CLI/TUI application for local cold-archive workflows. It uses 7z to create archive packages and SQLite to persist archive metadata and file indexes, so archived directories remain searchable, browsable, inspectable, and recoverable after they leave the active working set.
+Amber is a CLI/TUI application for local cold-archive workflows. It uses 7z to create archive packages and SQLite to persist archive metadata and file indexes, so archived directories can still be searched, browsed, inspected, and restored after they leave the active working set.
+
+This tool was built around the author's own archiving workflow. Features and interactions reflect that personal use case, so your mileage may vary.
 
 [中文](./README.zh-CN.md)
 
@@ -16,7 +18,7 @@ The project combines:
 - external metadata indexing with SQLite
 - terminal workflows for browsing, searching, exporting structure, and restoring files
 
-Instead of treating an archive as a compressed blob with no practical index, Amber keeps package data and metadata separate. That makes it possible to search across archived material without opening each archive package individually.
+Instead of treating an archive as a compressed blob with no practical index, Amber keeps package data and metadata separate. This makes it easier to search across archived material without opening each archive package individually.
 
 ## Features
 
