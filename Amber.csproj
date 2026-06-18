@@ -7,6 +7,8 @@
     <Nullable>enable</Nullable>
     <AssemblyName>Amber</AssemblyName>
     <RootNamespace>Amber</RootNamespace>
+    
+    <ApplicationIcon Condition="Exists('Amber.ico')">Amber.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>

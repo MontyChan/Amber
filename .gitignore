@@ -480,3 +480,9 @@ $RECYCLE.BIN/
 
 # Vim temporary swap files
 *.swp
+
+
+# ----------------------------------------------------
+# Custom / Personal Ignored Files (Added Manually)
+# ----------------------------------------------------
+Amber.ico
