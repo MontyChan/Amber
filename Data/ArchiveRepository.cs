@@ -173,6 +173,78 @@ WHERE id = @ArchiveId;";
             cancellationToken: cancellationToken));
     }
 
+    public async Task<string?> ResolveArchivePackagePathAsync(Archive archive, bool isStored, CancellationToken cancellationToken = default)
+    {
+        string? recordedPath = isStored ? archive.StoredPath : archive.CompressedPath;
+        if (string.IsNullOrWhiteSpace(recordedPath))
+        {
+            return null;
+        }
+
+        string fullRecordedPath = Path.GetFullPath(recordedPath);
+        if (File.Exists(fullRecordedPath))
+        {
+            return fullRecordedPath;
+        }
+
+        string fileName = Path.GetFileName(recordedPath);
+        if (string.IsNullOrWhiteSpace(fileName))
+        {
+            return fullRecordedPath;
+        }
+
+        string? relocatedPath = FindRelocatedPackagePath(recordedPath, fileName);
+        if (relocatedPath is null)
+        {
+            return fullRecordedPath;
+        }
+
+        await UpdateArchivePackagePathAsync(archive.Id, isStored, relocatedPath, cancellationToken);
+        if (isStored)
+        {
+            archive.StoredPath = relocatedPath;
+        }
+        else
+        {
+            archive.CompressedPath = relocatedPath;
+        }
+
+        return relocatedPath;
+    }
+
+    private string? FindRelocatedPackagePath(string recordedPath, string fileName)
+    {
+        string relocatedPath = Path.Combine(ArchiveOutputDirectory, fileName);
+        if (!File.Exists(relocatedPath))
+        {
+            string? oldParentName = Path.GetFileName(Path.GetDirectoryName(recordedPath));
+            if (string.IsNullOrWhiteSpace(oldParentName))
+            {
+                return null;
+            }
+
+            relocatedPath = Path.Combine(ArchiveOutputDirectory, oldParentName, fileName);
+            if (!File.Exists(relocatedPath))
+            {
+                return null;
+            }
+        }
+
+        return relocatedPath;
+    }
+
+    private async Task UpdateArchivePackagePathAsync(long archiveId, bool isStored, string packagePath, CancellationToken cancellationToken)
+    {
+        string columnName = isStored ? "stored_path" : "compressed_path";
+        string sql = $"UPDATE archives SET {columnName} = @PackagePath WHERE id = @ArchiveId;";
+
+        await using SqliteConnection connection = _database.OpenConnection();
+        await connection.ExecuteAsync(new CommandDefinition(
+            sql,
+            new { ArchiveId = archiveId, PackagePath = packagePath },
+            cancellationToken: cancellationToken));
+    }
+
     public async Task<IReadOnlyList<ArchiveFile>> GetArchiveFilesAsync(long archiveId, CancellationToken cancellationToken = default)
     {
         const string sql = @"

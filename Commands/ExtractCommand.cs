@@ -35,7 +35,7 @@ public static class ExtractCommand
                     throw new InvalidOperationException($"File does not exist in archive / 归档 #{archiveId} 中不存在文件：{normalizedRelativePath}");
                 }
 
-                string? packagePath = archiveFile.IsStored ? archive.StoredPath : archive.CompressedPath;
+                string? packagePath = await repository.ResolveArchivePackagePathAsync(archive, archiveFile.IsStored);
                 if (string.IsNullOrWhiteSpace(packagePath) || !File.Exists(packagePath))
                 {
                     throw new InvalidOperationException($"Archive package is missing / 归档包不存在：{packagePath ?? "<空路径>"}。可能已被移动或删除。");

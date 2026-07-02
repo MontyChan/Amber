@@ -329,7 +329,7 @@ public sealed class AmberConsoleApp
                                 }
 
                                 string normalizedRelativePath = selectedFile.RelativePath.Replace(Path.DirectorySeparatorChar, '/').Replace(Path.AltDirectorySeparatorChar, '/');
-                                string? packagePath = selectedFile.IsStored ? archive.StoredPath : archive.CompressedPath;
+                                string? packagePath = await _repository.ResolveArchivePackagePathAsync(archive, selectedFile.IsStored);
                                 if (string.IsNullOrWhiteSpace(packagePath) || !File.Exists(packagePath))
                                 {
                                     throw new InvalidOperationException($"Archive package is missing / 归档包不存在：{packagePath ?? "<empty>"}");
@@ -353,30 +353,32 @@ public sealed class AmberConsoleApp
             }
 
 
-    private static async Task ExtractAllArchivePackagesAsync(Archive archive, string outputDirectory)
+    private async Task ExtractAllArchivePackagesAsync(Archive archive, string outputDirectory)
     {
         SevenZipRunner runner = new();
         bool extractedAnyPackage = false;
 
         if (!string.IsNullOrWhiteSpace(archive.CompressedPath))
         {
-            if (!File.Exists(archive.CompressedPath))
+            string? compressedPath = await _repository.ResolveArchivePackagePathAsync(archive, isStored: false);
+            if (string.IsNullOrWhiteSpace(compressedPath) || !File.Exists(compressedPath))
             {
-                throw new InvalidOperationException($"Compressed archive package is missing / 压缩归档包不存在：{archive.CompressedPath}");
+                throw new InvalidOperationException($"Compressed archive package is missing / 压缩归档包不存在：{compressedPath ?? archive.CompressedPath}");
             }
 
-            await runner.ExtractArchiveAsync(archive.CompressedPath, outputDirectory);
+            await runner.ExtractArchiveAsync(compressedPath, outputDirectory);
             extractedAnyPackage = true;
         }
 
         if (!string.IsNullOrWhiteSpace(archive.StoredPath))
         {
-            if (!File.Exists(archive.StoredPath))
+            string? storedPath = await _repository.ResolveArchivePackagePathAsync(archive, isStored: true);
+            if (string.IsNullOrWhiteSpace(storedPath) || !File.Exists(storedPath))
             {
-                throw new InvalidOperationException($"Stored archive package is missing / 存储归档包不存在：{archive.StoredPath}");
+                throw new InvalidOperationException($"Stored archive package is missing / 存储归档包不存在：{storedPath ?? archive.StoredPath}");
             }
 
-            await runner.ExtractArchiveAsync(archive.StoredPath, outputDirectory);
+            await runner.ExtractArchiveAsync(storedPath, outputDirectory);
             extractedAnyPackage = true;
         }
 
