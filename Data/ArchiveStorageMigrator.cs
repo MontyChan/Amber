@@ -37,12 +37,11 @@ public sealed class ArchiveStorageMigrator
                 ProgressTask task = context.AddTask("Migrating storage locations / 正在迁移存储位置", maxValue: totalSteps);
 
                 await CopyArchivePackagesAsync(packageMoves, task, cancellationToken);
-                CopyFileIfNeeded(sourceDatabasePath, targetDatabasePath, task, cancellationToken);
-                _database.SetStorageLocations(targetDatabasePath, targetArchiveOutputDirectory);
-                SqliteConnection.ClearAllPools();
+                await UpdateDatabaseArchivePathsAsync(packageMoves, cancellationToken);
                 task.Increment(1);
 
-                await UpdateDatabaseArchivePathsAsync(packageMoves, cancellationToken);
+                CopyFileIfNeeded(sourceDatabasePath, targetDatabasePath, task, cancellationToken);
+                _database.SetStorageLocations(targetDatabasePath, targetArchiveOutputDirectory);
                 task.Increment(1);
 
                 SqliteConnection.ClearAllPools();
