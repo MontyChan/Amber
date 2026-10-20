@@ -146,7 +146,7 @@ public sealed class AmberConsoleApp
             return;
         }
 
-                bool includeHighEntropyFilesInCompression = AskYesNo("Compress high-entropy files too?", "压缩是否包括高熵文件？");
+                bool includeHighEntropyFilesInCompression = AskHighEntropyCompressionChoice();
 
                 try
         {
@@ -818,6 +818,23 @@ public sealed class AmberConsoleApp
                     {
                         new ConfirmationChoice(ConfirmationAction.Migrate, PlainLabel("Yes", "是")),
                         new ConfirmationChoice(ConfirmationAction.Back, PlainLabel("No", "否"))
+                    }));
+
+            return action.Action == ConfirmationAction.Migrate;
+        }
+
+        private static bool AskHighEntropyCompressionChoice()
+        {
+            ConfirmationChoice action = AnsiConsole.Prompt(
+                new SelectionPrompt<ConfirmationChoice>()
+                    .Title(CreatePromptTitle("Compress high-entropy files too?", "压缩是否包括高熵文件？"))
+                    .PageSize(4)
+                    .MoreChoicesText(CreateMoreChoicesText())
+                    .UseConverter(choice => choice.DisplayText)
+                    .AddChoices(new[]
+                    {
+                        new ConfirmationChoice(ConfirmationAction.Migrate, PlainLabel("Yes (recommended)", "是（推荐）")),
+                        new ConfirmationChoice(ConfirmationAction.Back, PlainLabel("No (not recommended)", "否（不推荐）"))
                     }));
 
             return action.Action == ConfirmationAction.Migrate;

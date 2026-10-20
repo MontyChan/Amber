@@ -6,8 +6,6 @@ Amber is a CLI/TUI application for local cold-archive workflows. It uses 7z to c
 
 This tool was built around the author's own archiving workflow. Features and interactions reflect that personal use case, so your mileage may vary.
 
-[中文](./README.zh-CN.md)
-
 ## Overview
 
 Amber is intended for directories that are no longer part of day-to-day work but still need to be retained and accessed later, such as legacy projects, archived documents, exported datasets, offline handoff materials, or photo and media backups.
@@ -38,10 +36,10 @@ Instead of treating an archive as a compressed blob with no practical index, Amb
 
 Each archive operation can produce up to two `.7z` packages:
 
-- a compressed package for files that still benefit from compression
-- a stored package for already-compressed or high-entropy files, avoiding unnecessary recompression overhead
+- a compressed package
+- a stored package for files selected for store mode
 
-By default, common pre-compressed formats are routed into the stored package. With `--compress-high-entropy`, those files can also be included in the compressed package.
+The archive pipeline uses LZMA2. Excluding high-entropy files is not a suitable compression optimization for this workflow, so it is not presented as a recommended option.
 
 Archive metadata, file paths, notes, and tags are persisted in SQLite rather than embedded inside the archive package. This allows archive records to be listed, searched, inspected, and restored without mounting or enumerating package contents first.
 
@@ -111,12 +109,6 @@ Archive with metadata and compression options:
 
 ```powershell README.md
 dotnet run -- archive "D:\OldProjects\ProjectA" --note "2023 client handoff" --tags "client,handoff" --level maximum --solid on
-```
-
-Also compress high-entropy files:
-
-```powershell README.md
-dotnet run -- archive "D:\OldProjects\ProjectA" --compress-high-entropy
 ```
 
 List archives:
