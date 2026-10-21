@@ -91,7 +91,7 @@ public sealed class AmberConsoleApp
         options.AddRow(MarkupLabel("Compression split", "压缩分组"), MarkupLabel("Pre-compressed media and archives go to store-mode package", "已压缩媒体与压缩包进入 store 包"));
         options.AddRow(MarkupLabel("Compression levels", "压缩等级"), MarkupLabel("Choose from store, fastest, fast, normal, maximum, ultra", "可选仅存储、最快、快速、标准、最大、极限"));
         options.AddRow(MarkupLabel("Advanced mode", "高级模式"), MarkupLabel("Optional dictionary, fast bytes, match finder, solid mode", "可选字典、Fast bytes、匹配器、solid 模式"));
-        options.AddRow(MarkupLabel("Sorting", "排序"), MarkupLabel("Grouped by extension, then ordered by greedy cosine similarity", "按扩展名分组，再按余弦相似度贪心排序"));
+        options.AddRow(MarkupLabel("Sorting", "排序"), MarkupLabel("Grouped by extension, then ordered by directory and size", "按扩展名分组，再按目录和大小排序"));
         options.AddRow(MarkupLabel("Database", "数据库"), $"[cyan]{Markup.Escape(_repository.DatabasePath)}[/]");
         options.AddRow(MarkupLabel("Archive Output", "归档输出"), $"[cyan]{Markup.Escape(_repository.ArchiveOutputDirectory)}[/]");
         options.AddRow(MarkupLabel("Navigation", "返回"), MarkupLabel($"Type [yellow]{BackKeyword}[/] in forms to go back", $"在表单中输入 [yellow]{BackKeyword}[/] 返回上一级"));
