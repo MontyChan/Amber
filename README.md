@@ -41,6 +41,21 @@ Each archive operation can produce up to two `.7z` packages:
 
 The archive pipeline uses LZMA2. Excluding high-entropy files is not a suitable compression optimization for this workflow, so it is not presented as a recommended option.
 
+### File Ordering and Directory Structure
+
+Before invoking 7-Zip, Amber builds a deterministic list of relative file paths. Files assigned to the compressed package are ordered by:
+
+1. file extension, using a case-insensitive comparison
+2. parent directory, using a case-insensitive comparison
+3. file size, from largest to smallest
+4. full relative path, using a case-insensitive comparison
+
+Files assigned to the store-mode package are ordered by relative path. Amber writes the resulting paths to a temporary list file and passes that file to 7-Zip while using the archived directory as the working directory.
+
+For non-store compression levels, Amber enables LZMA2 and solid mode by default. Solid compression allows adjacent files to share compression context, but 7-Zip does not perform Amber's ordering itself. The ordering only controls the sequence in which file contents enter the archive; it does not rename files, flatten directories, or change their relative paths. Each archive entry still contains its original relative path, so extracting the package recreates the original directory structure.
+
+The order shown in the 7-Zip file manager may differ from the physical input order because the file manager can sort its view by name, size, date, or another column. This display order does not change the stored paths or extraction result.
+
 Archive metadata, file paths, notes, and tags are persisted in SQLite rather than embedded inside the archive package. This allows archive records to be listed, searched, inspected, and restored without mounting or enumerating package contents first.
 
 Default storage root:
