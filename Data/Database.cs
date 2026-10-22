@@ -22,6 +22,18 @@ public sealed class Database
         ArchiveOutputDirectory = ResolveDirectoryPath(Locations.ArchiveOutputDirectory, _defaultArchiveOutputDirectory);
     }
 
+    public Database(string databasePath, string archiveOutputDirectory)
+    {
+        string homeDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        AppDirectory = Path.Combine(homeDirectory, ".amber");
+        LocationsFilePath = Path.Combine(AppDirectory, LocationsFileName);
+        _defaultDatabasePath = Path.Combine(AppDirectory, DefaultDatabaseFileName);
+        _defaultArchiveOutputDirectory = Path.Combine(AppDirectory, "archives");
+        Locations = new StorageLocations();
+        DatabasePath = ResolveDatabasePath(databasePath, _defaultDatabasePath);
+        ArchiveOutputDirectory = ResolveDirectoryPath(archiveOutputDirectory, _defaultArchiveOutputDirectory);
+    }
+
     public string AppDirectory { get; }
 
     public string LocationsFilePath { get; }

@@ -9,3 +9,13 @@ public sealed class ArchiveFile
     public DateTime ModifiedAt { get; set; }
     public bool IsStored { get; set; }
 }
+
+public sealed class ArchiveBrowserEntry
+{
+    public string Name { get; set; } = string.Empty;
+    public bool IsDirectory { get; set; }
+    public string RelativePath { get; set; } = string.Empty;
+    public long Size { get; set; }
+    public DateTime ModifiedAt { get; set; }
+    public bool IsStored { get; set; }
+}

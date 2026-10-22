@@ -267,6 +267,88 @@ ORDER BY relative_path ASC;";
         return items.ToList();
     }
 
+    public async Task<object> GetArchiveFilePageAsync(long archiveId, string prefix, string query, int page, int pageSize, CancellationToken cancellationToken = default)
+    {
+        page = Math.Max(page, 1);
+        pageSize = Math.Clamp(pageSize, 1, 500);
+        prefix = prefix.Replace('\\', '/').Trim('/');
+        string prefixPattern = string.IsNullOrEmpty(prefix) ? "%" : $"{EscapeLikePattern(prefix)}/%";
+        string queryPattern = string.IsNullOrWhiteSpace(query) ? "%" : $"%{EscapeLikePattern(query.Trim())}%";
+        const string countSql = @"
+SELECT COUNT(*) FROM files
+WHERE archive_id = @ArchiveId
+  AND relative_path LIKE @PrefixPattern
+  AND relative_path LIKE @QueryPattern COLLATE NOCASE;";
+        const string filesSql = @"
+SELECT id, archive_id AS ArchiveId, relative_path AS RelativePath, size, modified_at AS ModifiedAt, is_stored AS IsStored
+FROM files
+WHERE archive_id = @ArchiveId
+  AND relative_path LIKE @PrefixPattern
+  AND relative_path LIKE @QueryPattern COLLATE NOCASE
+ORDER BY relative_path ASC
+LIMIT @PageSize OFFSET @Offset;";
+
+        await using Microsoft.Data.Sqlite.SqliteConnection connection = _database.OpenConnection();
+        object parameters = new { ArchiveId = archiveId, PrefixPattern = prefixPattern, QueryPattern = queryPattern, PageSize = pageSize, Offset = (page - 1) * pageSize };
+        int total = await connection.ExecuteScalarAsync<int>(new CommandDefinition(countSql, parameters, cancellationToken: cancellationToken));
+        IEnumerable<ArchiveFile> files = await connection.QueryAsync<ArchiveFile>(new CommandDefinition(filesSql, parameters, cancellationToken: cancellationToken));
+        return new { files = files.ToList(), total, page, pageSize };
+    }
+
+    public async Task<IReadOnlyList<ArchiveBrowserEntry>> GetArchiveDirectoryEntriesAsync(long archiveId, string directoryPath, CancellationToken cancellationToken = default)
+    {
+        directoryPath = directoryPath.Replace('\\', '/').Trim('/');
+        if (directoryPath.Split('/', StringSplitOptions.RemoveEmptyEntries).Any(segment => segment is "." or ".."))
+        {
+            throw new ArgumentException("Invalid directory path / 无效的目录路径", nameof(directoryPath));
+        }
+
+        string prefix = string.IsNullOrEmpty(directoryPath) ? string.Empty : directoryPath + "/";
+        string prefixPattern = EscapeLikePattern(prefix) + "%";
+        const string sql = @"
+WITH scoped AS (
+    SELECT relative_path,
+           substr(relative_path, length(@Prefix) + 1) AS remainder,
+           size,
+           modified_at,
+           is_stored
+    FROM files
+    WHERE archive_id = @ArchiveId
+      AND relative_path LIKE @PrefixPattern ESCAPE '\'
+), segments AS (
+    SELECT CASE WHEN instr(remainder, '/') = 0 THEN remainder ELSE substr(remainder, 1, instr(remainder, '/') - 1) END AS Name,
+           CASE WHEN instr(remainder, '/') = 0 THEN 0 ELSE 1 END AS IsDirectory,
+           relative_path,
+           size,
+           modified_at,
+           is_stored
+    FROM scoped
+)
+SELECT Name,
+       IsDirectory,
+       CASE WHEN IsDirectory = 1 THEN CASE WHEN @DirectoryPath = '' THEN Name ELSE @DirectoryPath || '/' || Name END ELSE relative_path END AS RelativePath,
+       CASE WHEN IsDirectory = 1 THEN 0 ELSE size END AS Size,
+       modified_at AS ModifiedAt,
+       is_stored AS IsStored
+FROM segments
+GROUP BY Name, IsDirectory, RelativePath
+ORDER BY IsDirectory DESC, Name COLLATE NOCASE ASC;";
+
+        await using Microsoft.Data.Sqlite.SqliteConnection connection = _database.OpenConnection();
+        IEnumerable<ArchiveBrowserEntry> entries = await connection.QueryAsync<ArchiveBrowserEntry>(new CommandDefinition(
+            sql,
+            new { ArchiveId = archiveId, Prefix = prefix, PrefixPattern = prefixPattern, DirectoryPath = directoryPath },
+            cancellationToken: cancellationToken));
+        return entries.ToList();
+    }
+
+    private static string EscapeLikePattern(string value)
+    {
+        return value.Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace("%", "\\%", StringComparison.Ordinal)
+            .Replace("_", "\\_", StringComparison.Ordinal);
+    }
+
     public async Task<ArchiveFile?> GetArchiveFileAsync(long archiveId, string relativePath, CancellationToken cancellationToken = default)
     {
         const string sql = @"

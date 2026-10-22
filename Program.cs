@@ -4,6 +4,7 @@ using Spectre.Console;
 using Vault.Commands;
 using Vault.Data;
 using Vault.UI;
+using Vault.Web;
 
 
 Database database = new Database();
@@ -11,6 +12,7 @@ ArchiveRepository repository = new ArchiveRepository(database);
 RootCommand rootCommand = new("Amber - local cold archive CLI / 本地冷存档命令行工具");
 
 rootCommand.AddCommand(UiCommand.Create(repository));
+rootCommand.AddCommand(WebCommand.Create());
 rootCommand.AddCommand(ArchiveCommand.Create(repository));
 rootCommand.AddCommand(ListCommand.Create(repository));
 rootCommand.AddCommand(SearchCommand.Create(repository));
@@ -20,6 +22,12 @@ try
 {
     Console.InputEncoding = Encoding.UTF8;
     Console.OutputEncoding = Encoding.UTF8;
+
+    if (args.Length == 1 && args[0].Equals("web", StringComparison.OrdinalIgnoreCase))
+    {
+        return await AmberWebHost.RunAsync();
+    }
+
     database.Initialize();
 
 

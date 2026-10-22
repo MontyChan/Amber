@@ -112,6 +112,22 @@ Help:
 dotnet run -- --help
 ```
 
+Web interface:
+
+```powershell README.md
+dotnet run -- web
+```
+
+The Web interface is served by the same Amber process. During development, the Vue client can be built with Bun:
+
+```powershell README.md
+cd Client
+bun install
+bun run dev
+```
+
+The regular .NET build also runs `bun install --frozen-lockfile` and `bun run build`, then copies the generated client files into the application output. Bun is required when building from source, but is not required when running a published Amber package.
+
 ## CLI Examples
 
 Archive a directory:
