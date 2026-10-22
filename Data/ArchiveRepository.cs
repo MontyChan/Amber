@@ -249,6 +249,31 @@ WHERE id <> @ArchiveId
         return archive;
     }
 
+    public async Task UpdateArchiveMetadataAsync(long archiveId, string? note, string? tags, CancellationToken cancellationToken = default)
+    {
+        const string sql = @"
+UPDATE archives
+SET note = @Note,
+    tags = @Tags
+WHERE id = @ArchiveId;";
+
+        await using SqliteConnection connection = _database.OpenConnection();
+        int updated = await connection.ExecuteAsync(new CommandDefinition(
+            sql,
+            new
+            {
+                ArchiveId = archiveId,
+                Note = string.IsNullOrWhiteSpace(note) ? null : note.Trim(),
+                Tags = string.IsNullOrWhiteSpace(tags) ? null : tags.Trim()
+            },
+            cancellationToken: cancellationToken));
+
+        if (updated == 0)
+        {
+            throw new InvalidOperationException($"Archive #{archiveId} was not found / 未找到归档 #{archiveId}");
+        }
+    }
+
     public async Task<string?> ResolveArchivePackagePathAsync(Archive archive, bool isStored, CancellationToken cancellationToken = default)
     {
         string? recordedPath = isStored ? archive.StoredPath : archive.CompressedPath;

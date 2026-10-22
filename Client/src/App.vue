@@ -17,6 +17,7 @@ const busy = ref(false)
 const message = ref('')
 const error = ref('')
 const outputDirectory = ref('')
+const firstRunOpen = ref(false)
 const extractTarget = ref<FileRow | null | undefined>(undefined)
 const downloadFileName = ref('')
 const downloadProgress = ref(0)
@@ -31,6 +32,10 @@ const archiveProgress = ref({ stage: '', percent: 0, completed: 0, total: 0, mes
 const highEntropyWhyOpen = ref(false)
 const deleteArchiveTarget = ref<Archive | null>(null)
 const deletingArchive = ref(false)
+const editMetadataOpen = ref(false)
+const editNote = ref('')
+const editTags = ref('')
+const savingMetadata = ref(false)
 const compressionLevel = ref('ultra')
 const dictionarySize = ref('')
 const fastBytes = ref('')
@@ -40,9 +45,14 @@ let messageTimer: number | undefined
 
 async function request(url: string, init?: RequestInit) {
   const response = await fetch(url, init)
-  const data = await response.json()
+  const contentType = response.headers.get('content-type') || ''
+  const body = await response.text()
+  let data: { message?: string } = {}
+  if (body && contentType.includes('application/json')) {
+    try { data = JSON.parse(body) } catch { /* Keep the HTTP status as the useful error. */ }
+  }
   if (!response.ok) throw new Error(data.message ?? 'Request failed')
-  return data
+  return body ? JSON.parse(body) : null
 }
 
 async function loadSettings() {
@@ -50,6 +60,7 @@ async function loadSettings() {
     const data = await request('/api/settings')
     databasePath.value = data.databasePath
     archiveDirectory.value = data.archiveOutputDirectory
+    firstRunOpen.value = data.firstRun
     await loadArchives()
   } catch (e) { error.value = (e as Error).message }
 }
@@ -117,6 +128,31 @@ async function deleteArchive() {
     if (archives.value.length) await selectArchive(archives.value[0])
     showMessage(`Archive #${deletingId} deleted`)
   } catch (e) { error.value = (e as Error).message } finally { deletingArchive.value = false }
+}
+
+function openMetadataEditor() {
+  if (!selectedArchive.value) return
+  editNote.value = selectedArchive.value.note || ''
+  editTags.value = selectedArchive.value.tags || ''
+  editMetadataOpen.value = true
+}
+
+async function saveMetadata() {
+  if (!selectedArchive.value) return
+  savingMetadata.value = true; error.value = ''
+  try {
+    await request(`/api/archives/${selectedArchive.value.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ note: editNote.value, tags: editTags.value })
+    })
+    selectedArchive.value.note = editNote.value.trim() || undefined
+    selectedArchive.value.tags = editTags.value.trim() || undefined
+    const archive = archives.value.find(item => item.id === selectedArchive.value?.id)
+    if (archive) { archive.note = selectedArchive.value.note; archive.tags = selectedArchive.value.tags }
+    editMetadataOpen.value = false
+    showMessage('Archive details updated')
+  } catch (e) { error.value = (e as Error).message } finally { savingMetadata.value = false }
 }
 
 async function selectArchive(archive: Archive) {
@@ -211,8 +247,8 @@ onMounted(loadSettings)
     <main class="app-layout">
       <aside class="sidebar">
         <div class="sidebar-label">Storage</div>
-        <label>Database<input v-model="databasePath"></label>
-        <label>Archive directory<input v-model="archiveDirectory"></label>
+        <label>Database<input v-model="databasePath"><small class="storage-note">Stores the archive index, file paths, notes and tags. It does not contain the archive packages.</small></label>
+        <label>Archive directory<input v-model="archiveDirectory"><small class="storage-note">Stores the generated .7z packages. The database points to the package files in this directory.</small></label>
         <button class="button primary full" :disabled="busy" @click="openStorage">Load storage</button>
         <div class="sidebar-rule"></div>
         <div class="sidebar-label archive-label"><span class="archive-title">Archives <em>{{ archives.length }}</em></span><button class="add-archive" aria-label="Create archive" title="Create archive" @click="archiveDialogOpen = true">+</button></div>
@@ -226,19 +262,21 @@ onMounted(loadSettings)
       <section class="content">
         <div v-if="error" class="notice error">{{ error }}</div><div v-if="message" class="notice success"><span>{{ message }}</span><button class="notice-close" aria-label="Dismiss" @click="dismissMessage">×</button></div>
         <template v-if="selectedArchive">
-          <div class="content-heading"><div><div class="eyebrow">ARCHIVE #{{ selectedArchive.id }}</div><h2>{{ selectedArchive.note || 'Untitled archive' }}</h2><p>{{ selectedArchive.tags || 'No tags' }} <span class="divider">·</span> {{ selectedArchive.fileCount.toLocaleString() }} files</p></div><div class="heading-actions"><button class="button danger-outline" @click="deleteArchiveTarget = selectedArchive">Delete archive</button><button class="button primary" @click="extract()">Extract archive</button></div></div>
+          <div class="content-heading"><div><div class="eyebrow">ARCHIVE #{{ selectedArchive.id }}</div><h2>{{ selectedArchive.note || 'Untitled archive' }}</h2><p>{{ selectedArchive.tags || 'No tags' }} <span class="divider">·</span> {{ selectedArchive.fileCount.toLocaleString() }} files</p></div><div class="heading-actions"><button class="button" @click="openMetadataEditor">Edit details</button><button class="button danger-outline" @click="deleteArchiveTarget = selectedArchive">Delete archive</button><button class="button primary" @click="extract()">Extract archive</button></div></div>
           <div class="toolbar"><button v-if="prefix && !search" class="text-button" @click="goUp">Back</button><button v-if="prefix || search" class="text-button muted" @click="clearDirectory">Clear</button><span class="path">{{ prefix ? `/${prefix}` : '/ root' }}</span><div class="search-box"><span>⌕</span><input v-model="search" placeholder="Search files" @keyup.enter="page = 1; loadFiles()"></div><button class="button" @click="page = 1; loadFiles()">Search</button></div>
           <div class="table-wrap"><table><thead><tr><th>Name</th><th>Location</th><th>Size</th><th>Modified</th><th></th></tr></thead><tbody><tr v-for="file in files" :key="file.relativePath" class="file-row"><td><button v-if="file.isDirectory" class="directory-link" @click="openDirectory(file.relativePath)"><span class="folder-icon">▸</span>{{ fileName(file) }}</button><span v-else class="file-name"><span class="file-icon">·</span>{{ fileName(file) }}</span></td><td class="file-path">{{ file.relativePath }}</td><td>{{ file.isDirectory ? '—' : formatSize(file.size) }}</td><td>{{ file.isDirectory ? '—' : formatDate(file.modifiedAt) }}</td><td class="actions"><button v-if="!file.isDirectory" class="link-button" :disabled="downloading" @click="downloadFile(file)">Download</button><button v-if="!file.isDirectory" class="link-button" :disabled="downloading" @click="extract(file)">Extract</button></td></tr><tr v-if="!files.length"><td colspan="5" class="empty">No files found.</td></tr></tbody></table></div>
           <div v-if="search" class="pager"><span>{{ total.toLocaleString() }} results</span><div><button class="button subtle" :disabled="page <= 1" @click="page--; loadFiles()">Previous</button><span>Page {{ page }}</span><button class="button subtle" :disabled="page * 200 >= total" @click="page++; loadFiles()">Next</button></div></div>
         </template>
-        <div v-else class="empty-state"><div class="empty-mark">A</div><h2>Select an archive</h2><p>Choose an archive from the sidebar to browse its indexed files.</p></div>
+        <div v-else class="empty-state"><h2>Select an archive</h2><p>Choose an archive from the sidebar to browse its indexed files.</p></div>
       </section>
     </main>
 
     <div v-if="extractTarget !== undefined" class="modal-backdrop" @click.self="extractTarget = undefined"><section class="modal"><div class="modal-heading"><div><div class="eyebrow">RESTORE</div><h2>{{ extractTarget ? 'Extract file' : 'Extract archive' }}</h2><p>{{ extractTarget?.relativePath || selectedArchive?.note || `Archive #${selectedArchive?.id}` }}</p></div><button class="icon-button" aria-label="Close" @click="extractTarget = undefined">×</button></div><label class="output-field">Output directory<input v-model="outputDirectory" placeholder="F:\\Restored" @keyup.enter="confirmExtract"></label><div class="modal-actions"><button class="button" @click="extractTarget = undefined">Cancel</button><button class="button primary" :disabled="busy || !outputDirectory.trim()" @click="confirmExtract">{{ busy ? 'Extracting…' : 'Extract' }}</button></div></section></div>
     <div v-if="archiveDialogOpen" class="modal-backdrop" @click.self="!creatingArchive && (archiveDialogOpen = false)"><section class="modal archive-modal"><div class="modal-heading"><div><div class="eyebrow">NEW ARCHIVE</div><h2>{{ creatingArchive ? 'Creating archive' : 'Create archive' }}</h2><p>{{ creatingArchive ? archiveProgress.message : 'Packages are written to the selected archive directory.' }}</p></div><button class="icon-button" aria-label="Close" :disabled="creatingArchive" @click="archiveDialogOpen = false">×</button></div><template v-if="!creatingArchive"><label class="output-field">Source directory<input v-model="archiveDirectoryInput" placeholder="G:\\Projects\\OldProject"><small class="field-note">Enter the full local path. Browsers cannot provide a real local folder path to the server.</small></label><div class="form-grid"><label class="output-field">Note<input v-model="archiveNote" placeholder="Optional"></label><label class="output-field">Tags<input v-model="archiveTags" placeholder="Comma-separated"></label></div><label class="output-field level-field">Compression level<select v-model="compressionLevel"><option value="store">Store</option><option value="fastest">Fastest</option><option value="fast">Fast</option><option value="normal">Normal</option><option value="maximum">Maximum</option><option value="ultra">Ultra</option></select></label><div class="check-option"><input v-model="includeHighEntropyFiles" type="checkbox"><span>Include high-entropy files <small>Discouraged to disable</small></span><button class="why-button" type="button" @click="highEntropyWhyOpen = true">Why?</button></div><details class="advanced-settings"><summary>Advanced settings</summary><div class="form-grid"><label class="output-field">Dictionary size<input v-model="dictionarySize" :disabled="compressionLevel === 'store'" placeholder="e.g. 64m"></label><label class="output-field">Fast bytes<input v-model="fastBytes" :disabled="compressionLevel === 'store'" type="number" min="5" max="273" placeholder="5–273"></label><label class="output-field">Match finder<select v-model="matchFinder" :disabled="compressionLevel === 'store'"><option value="default">Default</option><option value="bt2">bt2</option><option value="bt3">bt3</option><option value="bt4">bt4</option><option value="hc4">hc4</option></select></label><label class="output-field">Solid mode<input v-model="solidMode" :disabled="compressionLevel === 'store'" placeholder="e.g. on, 512m"></label></div><p v-if="compressionLevel === 'store'" class="field-hint">Advanced compression settings are unavailable in Store mode.</p></details></template><div v-else class="archive-progress"><div class="progress-summary"><span>{{ archiveProgress.message }}</span><strong>{{ archiveProgress.percent }}%</strong></div><div class="progress-track"><div class="progress-value" :style="{ width: `${archiveProgress.percent}%` }"></div></div><div class="progress-stage"><span :class="{ active: archiveProgress.stage === 'scan' }">Scan</span><span :class="{ active: archiveProgress.stage === 'classify' }">Classify</span><span :class="{ active: ['compress', 'store'].includes(archiveProgress.stage) }">Compress</span><span :class="{ active: archiveProgress.stage === 'database' }">Index</span></div><p v-if="archiveProgress.total">{{ archiveProgress.completed.toLocaleString() }} / {{ archiveProgress.total.toLocaleString() }}</p></div><div class="modal-actions"><button v-if="!creatingArchive" class="button" @click="archiveDialogOpen = false">Cancel</button><button v-if="!creatingArchive" class="button primary" :disabled="!archiveDirectoryInput.trim()" @click="createArchive">Create archive</button></div></section></div>
     <div v-if="highEntropyWhyOpen" class="modal-backdrop" @click.self="highEntropyWhyOpen = false"><section class="modal explanation-modal"><div class="modal-heading"><div><div class="eyebrow">COMPRESSION NOTE</div><h2>Why include these files?</h2></div><button class="icon-button" aria-label="Close" @click="highEntropyWhyOpen = false">×</button></div><div class="explanation"><p>Amber uses 7-Zip with LZMA2 and solid compression. LZMA2 can share its dictionary across nearby data, while detecting data that does not compress well and storing those chunks without further compression. As a result, high-entropy files usually stay close to their original size instead of growing substantially; a small amount of block and archive metadata overhead can still apply.</p><p>High-entropy files include video, audio, images, ZIP files and other archives. They often cannot be made much smaller, but including them keeps the archive in one package and lets LZMA2 handle each file according to its contents. This avoids relying on extension-based classification to decide in advance which files should be compressed or stored separately.</p><p>Keeping the full file set together also makes the archive easier to move, back up, browse and restore. Amber records every original relative path in the database and the archive; compression order affects storage inside the package, not the directory structure.</p><p>Turn this option off only when you specifically want high-entropy files routed to the separate store-mode package.</p></div><div class="modal-actions"><button class="button primary" @click="highEntropyWhyOpen = false">Understood</button></div></section></div>
+    <div v-if="firstRunOpen" class="modal-backdrop"><section class="modal first-run-modal"><div class="modal-heading"><div><div class="eyebrow">WELCOME TO AMBER</div><h2>Storage has been set up</h2><p>Amber created its default database and archive folder for this computer.</p></div></div><div class="first-run-details"><div><strong>Database</strong><code>{{ databasePath }}</code><p>Stores the archive list, indexed file paths, notes and tags. It does not contain the archived file contents.</p></div><div><strong>Archive directory</strong><code>{{ archiveDirectory }}</code><p>Stores the actual .7z packages created by Amber. Keep these packages together with the database.</p></div></div><p class="first-run-tip">You can change either path at any time in the Storage section on the left. Enter the new paths and select <strong>Load storage</strong>. Changing a path only tells Amber where to look; it does not move existing files.</p><div class="modal-actions"><button class="button primary" @click="firstRunOpen = false">Got it</button></div></section></div>
     <div v-if="deleteArchiveTarget" class="modal-backdrop" @click.self="deleteArchiveTarget = null"><section class="modal confirm-delete-modal"><div class="modal-heading"><div><div class="eyebrow">DELETE ARCHIVE</div><h2>Delete this archive?</h2><p>Archive #{{ deleteArchiveTarget.id }} · {{ deleteArchiveTarget.fileCount.toLocaleString() }} indexed files</p></div><button class="icon-button" aria-label="Close" :disabled="deletingArchive" @click="deleteArchiveTarget = null">×</button></div><p class="delete-warning">This removes the archive record, its file index, and its package files. This action cannot be undone.</p><div class="modal-actions"><button class="button" :disabled="deletingArchive" @click="deleteArchiveTarget = null">Cancel</button><button class="button danger" :disabled="deletingArchive" @click="deleteArchive">{{ deletingArchive ? 'Deleting…' : 'Delete archive' }}</button></div></section></div>
+    <div v-if="editMetadataOpen" class="modal-backdrop" @click.self="!savingMetadata && (editMetadataOpen = false)"><section class="modal metadata-modal"><div class="modal-heading"><div><div class="eyebrow">ARCHIVE DETAILS</div><h2>Edit details</h2><p>Only the note and tags will be changed.</p></div><button class="icon-button" aria-label="Close" :disabled="savingMetadata" @click="editMetadataOpen = false">×</button></div><label class="output-field">Note<input v-model="editNote" placeholder="Optional"></label><label class="output-field">Tags<input v-model="editTags" placeholder="Comma-separated, optional"></label><div class="modal-actions"><button class="button" :disabled="savingMetadata" @click="editMetadataOpen = false">Cancel</button><button class="button primary" :disabled="savingMetadata" @click="saveMetadata">{{ savingMetadata ? 'Saving…' : 'Save details' }}</button></div></section></div>
     <div v-if="downloading" class="download-toast"><div class="download-line"><span>Downloading {{ downloadFileName }}</span><strong>{{ downloadProgress ? `${downloadProgress}%` : 'Preparing…' }}</strong></div><div class="progress-track"><div class="progress-value" :style="{ width: `${downloadProgress}%` }"></div></div></div>
   </div>
 </template>

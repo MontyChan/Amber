@@ -42,7 +42,7 @@ public static class AmberWebHost
 
     private static void MapEndpoints(WebApplication app, WebSession session)
     {
-        app.MapGet("/api/settings", () => Results.Ok(new { databasePath = session.DatabasePath, archiveOutputDirectory = session.ArchiveOutputDirectory }));
+        app.MapGet("/api/settings", () => Results.Ok(new { databasePath = session.DatabasePath, archiveOutputDirectory = session.ArchiveOutputDirectory, firstRun = session.FirstRun }));
 
         app.MapPost("/api/settings/open", (OpenSettingsRequest request) =>
         {
@@ -84,6 +84,19 @@ public static class AmberWebHost
             {
                 await session.Repository.DeleteArchiveAsync(archiveId, cancellationToken);
                 return Results.Ok(new { message = "Archive deleted" });
+            }
+            catch (Exception exception)
+            {
+                return Results.BadRequest(new { message = exception.Message });
+            }
+        });
+
+        app.MapPatch("/api/archives/{archiveId:long}", async (long archiveId, UpdateArchiveMetadataRequest request, CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                await session.Repository.UpdateArchiveMetadataAsync(archiveId, request.Note, request.Tags, cancellationToken);
+                return Results.Ok(new { message = "Archive details updated" });
             }
             catch (Exception exception)
             {
@@ -147,6 +160,7 @@ public static class AmberWebHost
 
 public sealed record OpenSettingsRequest(string DatabasePath, string ArchiveOutputDirectory);
 public sealed record ExtractRequest(string RelativePath, string OutputDirectory);
+public sealed record UpdateArchiveMetadataRequest(string? Note, string? Tags);
 public sealed record CreateArchiveRequest(
     string Directory,
     string? Note,
@@ -167,9 +181,12 @@ public sealed class WebSession
     public WebSession()
     {
         _database = new Database();
+        FirstRun = !File.Exists(_database.LocationsFilePath);
+        _database.Initialize();
         _repository = new ArchiveRepository(_database);
     }
 
+    public bool FirstRun { get; }
     public ArchiveRepository Repository => _repository;
     public string DatabasePath => _database.DatabasePath;
     public string ArchiveOutputDirectory => _database.ArchiveOutputDirectory;

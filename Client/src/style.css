@@ -32,6 +32,7 @@ p { margin-top: 6px; color: #777976; font-size: 13px; }
 .sidebar-label { display: flex; align-items: center; justify-content: space-between; margin: 0 7px 12px; }
 .sidebar-label span { color: #898a85; font-size: 11px; font-weight: 500; letter-spacing: 0; }
 .sidebar label, .output-field { display: grid; gap: 6px; margin: 0 7px 12px; color: #666762; font-size: 11px; font-weight: 600; }
+.storage-note { color: #92938d; font-size: 10px; font-weight: 400; line-height: 1.4; }
 input, select { min-width: 0; height: 35px; padding: 0 9px; border: 1px solid #deded9; border-radius: 3px; outline: none; background: #fff; color: #30312e; font-size: 12px; }
 input:focus { border-color: #b27a65; box-shadow: 0 0 0 2px #f2e7e2; }
 .button { display: inline-flex; align-items: center; justify-content: center; height: 34px; padding: 0 12px; border: 1px solid #deded9; border-radius: 3px; background: #fff; color: #42433f; font-size: 12px; cursor: pointer; transition: background .14s ease, border-color .14s ease; }
@@ -143,7 +144,15 @@ tbody tr:last-child td { border-bottom: 0; }
 .explanation { display: grid; gap: 13px; margin-top: 20px; }
 .explanation p { margin: 0; color: #5d5e58; font-size: 13px; line-height: 1.65; }
 .confirm-delete-modal { width: min(480px, 100%); }
+.metadata-modal { width: min(480px, 100%); }
 .delete-warning { padding: 12px; margin-top: 20px; border-left: 2px solid #b26b55; background: #faf5f2; color: #6b5248; font-size: 12px; line-height: 1.55; }
+.first-run-modal { width: min(600px, 100%); }
+.first-run-details { display: grid; gap: 16px; margin-top: 22px; }
+.first-run-details > div { display: grid; gap: 6px; }
+.first-run-details strong { color: #555650; font-size: 12px; }
+.first-run-details code { overflow-wrap: anywhere; padding: 9px 10px; border: 1px solid #e6e6e1; border-radius: 3px; background: #f8f8f6; color: #704d40; font-size: 12px; }
+.first-run-details p, .first-run-tip { margin: 0; color: #777872; font-size: 12px; line-height: 1.55; }
+.first-run-tip { margin-top: 20px; padding-top: 15px; border-top: 1px solid #ecece7; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
 .download-toast { position: fixed; right: 24px; bottom: 24px; width: min(360px, calc(100vw - 32px)); padding: 14px 16px; border: 1px solid #e5ddd8; border-radius: 4px; background: #fff; }
 .download-line { display: flex; justify-content: space-between; gap: 14px; margin-bottom: 10px; color: #555650; font-size: 12px; }
