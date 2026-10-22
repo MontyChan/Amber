@@ -94,13 +94,19 @@ dotnet build
 
 ## Run
 
-Interactive UI:
+Web interface (recommended):
 
 ```powershell README.md
 dotnet run
 ```
 
-Explicit UI command:
+The explicit Web command is also available:
+
+```powershell README.md
+dotnet run -- web
+```
+
+Terminal UI (secondary):
 
 ```powershell README.md
 dotnet run -- ui
@@ -110,12 +116,6 @@ Help:
 
 ```powershell README.md
 dotnet run -- --help
-```
-
-Web interface:
-
-```powershell README.md
-dotnet run -- web
 ```
 
 The Web interface is served by the same Amber process. During development, the Vue client can be built with Bun:

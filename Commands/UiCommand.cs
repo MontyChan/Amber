@@ -8,7 +8,7 @@ public static class UiCommand
 {
     public static Command Create(ArchiveRepository repository)
     {
-        Command command = new("ui", "Launch interactive terminal UI / 启动交互式终端界面");
+        Command command = new("ui", "Launch secondary terminal UI / 启动备用终端界面");
 
         command.SetHandler(async () =>
         {

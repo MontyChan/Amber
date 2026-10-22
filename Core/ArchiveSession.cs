@@ -6,8 +6,11 @@ using Vault.Models;
 
 namespace Vault.Core;
 
+public sealed record ArchiveProgressUpdate(string Stage, int Percent, long Completed, long Total, string Message);
+
 public sealed class ArchiveSession
 {
+    private const int ProgressReportInterval = 256;
     private readonly ArchiveRepository _repository;
     private readonly FileSorter _fileSorter;
     private readonly SevenZipRunner _sevenZipRunner;
@@ -40,7 +43,8 @@ public sealed class ArchiveSession
         string? tags,
         ArchiveCompressionOptions compressionOptions,
         bool includeHighEntropyFilesInCompression,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        Action<ArchiveProgressUpdate>? progressCallback = null)
     {
         string fullTargetDirectory = Path.GetFullPath(targetDirectory);
         if (!Directory.Exists(fullTargetDirectory))
@@ -81,7 +85,17 @@ public sealed class ArchiveSession
 
                 scanTask.IsIndeterminate = true;
 
-                allFiles = Directory.EnumerateFiles(fullTargetDirectory, "*", SearchOption.AllDirectories).ToArray();
+                progressCallback?.Invoke(new ArchiveProgressUpdate("scan", 0, 0, 0, "Scanning source files"));
+                List<string> scannedFiles = new();
+                foreach (string filePath in Directory.EnumerateFiles(fullTargetDirectory, "*", SearchOption.AllDirectories))
+                {
+                    scannedFiles.Add(filePath);
+                    if (scannedFiles.Count % ProgressReportInterval == 0)
+                    {
+                        progressCallback?.Invoke(new ArchiveProgressUpdate("scan", 0, scannedFiles.Count, 0, $"Found {scannedFiles.Count:N0} files"));
+                    }
+                }
+                allFiles = scannedFiles.ToArray();
                 scanDuration = phaseStopwatch.Elapsed;
                 if (allFiles.Length == 0)
                 {
@@ -93,6 +107,7 @@ public sealed class ArchiveSession
                 scanTask.IsIndeterminate = false;
                 SetTaskValue(scanTask, 100);
                 scanTask.Description = FormatCompletedProgressDescription("扫描完成", $"{allFiles.Length:N0} files", "green", completedProgressTitleWidth, completedProgressDescriptionWidth);
+                progressCallback?.Invoke(new ArchiveProgressUpdate("scan", 100, allFiles.Length, allFiles.Length, $"Scanned {allFiles.Length:N0} files"));
 
                 sortTask.MaxValue = allFiles.Length;
                 sortTask.Description = FormatActiveProgressDescription("整理归档顺序", $"0/{allFiles.Length:N0}", "cyan");
@@ -105,6 +120,7 @@ public sealed class ArchiveSession
                     {
                         SetTaskValue(sortTask, processed);
                         sortTask.Description = FormatActiveProgressDescription("整理归档顺序", $"{processed:N0}/{allFiles.Length:N0}", "cyan");
+                        progressCallback?.Invoke(new ArchiveProgressUpdate("classify", (int)(processed * 100d / allFiles.Length), processed, allFiles.Length, $"Classified {processed:N0} of {allFiles.Length:N0} files"));
                     });
                 classifyDuration = phaseStopwatch.Elapsed;
                 sortTask.Description = FormatCompletedProgressDescription(
@@ -114,6 +130,7 @@ public sealed class ArchiveSession
                     completedProgressTitleWidth,
                     completedProgressDescriptionWidth);
                 SetTaskValue(sortTask, allFiles.Length);
+                progressCallback?.Invoke(new ArchiveProgressUpdate("classify", 100, allFiles.Length, allFiles.Length, "File classification complete"));
 
                 string timestamp = DateTimeOffset.Now.ToString("yyyyMMdd_HHmmss");
                 compressedArchivePath = Path.Combine(_repository.ArchiveOutputDirectory, $"{timestamp}_compressed.7z");
@@ -126,12 +143,17 @@ public sealed class ArchiveSession
                 if (classificationResult.CompressedFiles.Count > 0)
                 {
                     compressTask.Description = FormatActiveProgressDescription("生成压缩包", $"compressed: {classificationResult.CompressedFiles.Count:N0} files", "cyan");
+                    progressCallback?.Invoke(new ArchiveProgressUpdate("compress", 0, 0, 100, "Compressing files"));
                     await _sevenZipRunner.CreateArchiveAsync(
                         compressedArchivePath,
                         fullTargetDirectory,
                         classificationResult.CompressedFiles.Select(file => file.ArchiveEntryPath).ToList(),
                         compressionOptions,
-                        progress => SetTaskValue(compressTask, progress),
+                        progress =>
+                        {
+                            SetTaskValue(compressTask, classificationResult.StoredFiles.Count > 0 ? progress / 2d : progress);
+                            progressCallback?.Invoke(new ArchiveProgressUpdate("compress", classificationResult.StoredFiles.Count > 0 ? progress / 2 : progress, progress, 100, "Compressing files"));
+                        },
                         cancellationToken);
                 }
                 else
@@ -144,12 +166,18 @@ public sealed class ArchiveSession
                 {
                     compressTask.Description = FormatActiveProgressDescription("生成存储包", $"stored: {classificationResult.StoredFiles.Count:N0} files", "cyan");
                     SetTaskValue(compressTask, classificationResult.CompressedFiles.Count > 0 ? 50 : 0);
+                    progressCallback?.Invoke(new ArchiveProgressUpdate("store", classificationResult.CompressedFiles.Count > 0 ? 50 : 0, 0, 100, "Writing store-mode package"));
                     await _sevenZipRunner.CreateArchiveAsync(
                         storedArchivePath,
                         fullTargetDirectory,
                         classificationResult.StoredFiles.Select(file => file.ArchiveEntryPath).ToList(),
                         ArchiveCompressionOptions.Store,
-                        progress => SetTaskValue(compressTask, classificationResult.CompressedFiles.Count > 0 ? 50 + (progress / 2d) : progress),
+                        progress =>
+                        {
+                            int overallProgress = classificationResult.CompressedFiles.Count > 0 ? 50 + (progress / 2) : progress;
+                            SetTaskValue(compressTask, overallProgress);
+                            progressCallback?.Invoke(new ArchiveProgressUpdate("store", overallProgress, progress, 100, "Writing store-mode package"));
+                        },
                         cancellationToken);
                 }
                 else
@@ -160,6 +188,7 @@ public sealed class ArchiveSession
                 compressDuration = phaseStopwatch.Elapsed;
                 compressTask.Description = FormatCompletedProgressDescription("归档包已生成", null, "green", completedProgressTitleWidth, completedProgressDescriptionWidth);
                 SetTaskValue(compressTask, 100);
+                progressCallback?.Invoke(new ArchiveProgressUpdate("compress", 100, 100, 100, "Archive packages created"));
 
                 List<ArchiveFile> files = BuildArchiveFiles(classificationResult);
                 Archive archive = new()
@@ -173,6 +202,7 @@ public sealed class ArchiveSession
 
                 persistTask.MaxValue = Math.Max(files.Count, 1);
                 persistTask.Description = FormatActiveProgressDescription("写入数据库", $"0/{files.Count:N0}", "cyan");
+                progressCallback?.Invoke(new ArchiveProgressUpdate("database", 0, 0, files.Count, "Writing archive index"));
                 phaseStopwatch.Restart();
 
                 try
@@ -184,12 +214,14 @@ public sealed class ArchiveSession
                         {
                             SetTaskValue(persistTask, processed);
                             persistTask.Description = FormatActiveProgressDescription("写入数据库", $"{processed:N0}/{files.Count:N0}", "cyan");
+                            progressCallback?.Invoke(new ArchiveProgressUpdate("database", (int)(processed * 100d / Math.Max(files.Count, 1)), processed, files.Count, $"Indexed {processed:N0} of {files.Count:N0} files"));
                         },
                         cancellationToken);
                     persistDuration = phaseStopwatch.Elapsed;
                     persistTask.Description = FormatCompletedProgressDescription("数据库写入完成", $"{files.Count:N0} rows", "green", completedProgressTitleWidth, completedProgressDescriptionWidth);
                     SetTaskValue(persistTask, Math.Max(files.Count, 1));
                     CreatedArchiveId = archiveId;
+                    progressCallback?.Invoke(new ArchiveProgressUpdate("completed", 100, files.Count, files.Count, "Archive complete"));
                 }
                 catch
                 {

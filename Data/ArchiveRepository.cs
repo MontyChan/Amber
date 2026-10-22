@@ -173,6 +173,82 @@ WHERE id = @ArchiveId;";
             cancellationToken: cancellationToken));
     }
 
+    public async Task<Archive> DeleteArchiveAsync(long archiveId, CancellationToken cancellationToken = default)
+    {
+        Archive archive = await GetArchiveByIdAsync(archiveId, cancellationToken)
+            ?? throw new InvalidOperationException($"Archive #{archiveId} was not found / 未找到归档 #{archiveId}");
+
+        List<string> packagePaths = new[] { archive.CompressedPath, archive.StoredPath }
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Select(path => Path.GetFullPath(path!))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        await using SqliteConnection connection = _database.OpenConnection();
+        await using SqliteTransaction transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+
+        const string sharedPackageSql = @"
+SELECT COUNT(*)
+FROM archives
+WHERE id <> @ArchiveId
+  AND (compressed_path = @PackagePath OR stored_path = @PackagePath);";
+        foreach (string packagePath in packagePaths)
+        {
+            int references = await connection.ExecuteScalarAsync<int>(new CommandDefinition(
+                sharedPackageSql,
+                new { ArchiveId = archiveId, PackagePath = packagePath },
+                transaction,
+                cancellationToken: cancellationToken));
+            if (references > 0)
+            {
+                throw new InvalidOperationException($"Archive package is shared by another archive / 归档包被其他归档共用：{packagePath}");
+            }
+        }
+
+        List<(string OriginalPath, string StagedPath)> stagedPackages = new();
+        try
+        {
+            foreach (string packagePath in packagePaths)
+            {
+                if (!File.Exists(packagePath)) continue;
+                string stagedPath = $"{packagePath}.amber-delete-{Guid.NewGuid():N}";
+                File.Move(packagePath, stagedPath);
+                stagedPackages.Add((packagePath, stagedPath));
+            }
+
+            await connection.ExecuteAsync(new CommandDefinition(
+                "DELETE FROM files WHERE archive_id = @ArchiveId;",
+                new { ArchiveId = archiveId },
+                transaction,
+                cancellationToken: cancellationToken));
+            await connection.ExecuteAsync(new CommandDefinition(
+                "DELETE FROM archives WHERE id = @ArchiveId;",
+                new { ArchiveId = archiveId },
+                transaction,
+                cancellationToken: cancellationToken));
+            await transaction.CommitAsync(cancellationToken);
+        }
+        catch
+        {
+            await transaction.RollbackAsync(CancellationToken.None);
+            foreach ((string originalPath, string stagedPath) in stagedPackages.AsEnumerable().Reverse())
+            {
+                if (File.Exists(stagedPath) && !File.Exists(originalPath))
+                {
+                    File.Move(stagedPath, originalPath);
+                }
+            }
+            throw;
+        }
+
+        foreach ((_, string stagedPath) in stagedPackages)
+        {
+            File.Delete(stagedPath);
+        }
+
+        return archive;
+    }
+
     public async Task<string?> ResolveArchivePackagePathAsync(Archive archive, bool isStored, CancellationToken cancellationToken = default)
     {
         string? recordedPath = isStored ? archive.StoredPath : archive.CompressedPath;

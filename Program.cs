@@ -28,17 +28,12 @@ try
         return await AmberWebHost.RunAsync();
     }
 
-    database.Initialize();
-
-
     if (args.Length == 0)
     {
-                AmberConsoleApp.PrepareConsoleForUi();
-        AmberConsoleApp app = new(repository);
-
-        await app.RunMainMenuAsync();
-        return 0;
+        return await AmberWebHost.RunAsync();
     }
+
+    database.Initialize();
 
     if (args.Length == 1 && (args[0] == "--help" || args[0] == "-h" || args[0] == "-?" || args[0].Equals("help", StringComparison.OrdinalIgnoreCase)))
     {

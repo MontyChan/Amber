@@ -59,6 +59,38 @@ public static class AmberWebHost
 
         app.MapGet("/api/archives", async (CancellationToken cancellationToken) => Results.Ok(await session.Repository.GetArchiveSummariesAsync(cancellationToken)));
 
+        app.MapPost("/api/archives", async (CreateArchiveRequest request, CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                ArchiveJobSnapshot job = session.StartArchive(request);
+                return Results.Accepted($"/api/archive-jobs/{job.Id}", job);
+            }
+            catch (Exception exception)
+            {
+                return Results.BadRequest(new { message = exception.Message });
+            }
+        });
+
+        app.MapGet("/api/archive-jobs/{jobId:guid}", (Guid jobId) =>
+        {
+            ArchiveJobSnapshot? job = session.GetArchiveJob(jobId);
+            return job is null ? Results.NotFound() : Results.Ok(job);
+        });
+
+        app.MapDelete("/api/archives/{archiveId:long}", async (long archiveId, CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                await session.Repository.DeleteArchiveAsync(archiveId, cancellationToken);
+                return Results.Ok(new { message = "Archive deleted" });
+            }
+            catch (Exception exception)
+            {
+                return Results.BadRequest(new { message = exception.Message });
+            }
+        });
+
         app.MapGet("/api/archives/{archiveId:long}", async (long archiveId, CancellationToken cancellationToken) =>
         {
             Archive? archive = await session.Repository.GetArchiveByIdAsync(archiveId, cancellationToken);
@@ -115,11 +147,22 @@ public static class AmberWebHost
 
 public sealed record OpenSettingsRequest(string DatabasePath, string ArchiveOutputDirectory);
 public sealed record ExtractRequest(string RelativePath, string OutputDirectory);
+public sealed record CreateArchiveRequest(
+    string Directory,
+    string? Note,
+    string? Tags,
+    bool IncludeHighEntropyFiles,
+    string Level = "ultra",
+    string? DictionarySize = null,
+    int? FastBytes = null,
+    string? MatchFinder = null,
+    string? SolidMode = null);
 
 public sealed class WebSession
 {
     private Database _database;
     private ArchiveRepository _repository;
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, ArchiveJob> _archiveJobs = new();
 
     public WebSession()
     {
@@ -183,6 +226,70 @@ public sealed class WebSession
         await runner.ExtractSingleFileAsync(packagePath, FileSorter.ToArchiveEntryPath(normalizedPath), fullOutputDirectory, cancellationToken);
     }
 
+    public ArchiveJobSnapshot StartArchive(CreateArchiveRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Directory))
+        {
+            throw new InvalidOperationException("Archive source directory is required / 归档源目录不能为空");
+        }
+
+        ArchiveCompressionOptions compressionOptions = BuildCompressionOptions(request);
+        Guid jobId = Guid.NewGuid();
+        ArchiveJob job = new(jobId);
+        _archiveJobs[jobId] = job;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                ArchiveSession session = new(_repository);
+                await session.RunAsync(
+                    request.Directory,
+                    request.Note,
+                    request.Tags,
+                    compressionOptions,
+                    request.IncludeHighEntropyFiles,
+                    CancellationToken.None,
+                    job.Report);
+                job.Complete(session.CreatedArchiveId);
+            }
+            catch (Exception exception)
+            {
+                job.Fail(exception.Message);
+            }
+        });
+
+        return job.Snapshot();
+    }
+
+    public ArchiveJobSnapshot? GetArchiveJob(Guid jobId)
+    {
+        return _archiveJobs.TryGetValue(jobId, out ArchiveJob? job) ? job.Snapshot() : null;
+    }
+
+    private static ArchiveCompressionOptions BuildCompressionOptions(CreateArchiveRequest request)
+    {
+        SevenZipCompressionLevel level = request.Level.Trim().ToLowerInvariant() switch
+        {
+            "store" or "0" => SevenZipCompressionLevel.Store,
+            "fastest" or "1" => SevenZipCompressionLevel.Fastest,
+            "fast" or "3" => SevenZipCompressionLevel.Fast,
+            "normal" or "5" => SevenZipCompressionLevel.Normal,
+            "maximum" or "max" or "7" => SevenZipCompressionLevel.Maximum,
+            "ultra" or "9" => SevenZipCompressionLevel.Ultra,
+            _ => throw new InvalidOperationException("Invalid compression level / 无效的压缩等级")
+        };
+
+        return new ArchiveCompressionOptions
+        {
+            Level = level,
+            DictionarySize = request.DictionarySize,
+            FastBytes = request.FastBytes,
+            MatchFinder = request.MatchFinder,
+            SolidMode = request.SolidMode
+        }.Validate();
+    }
+
     public async Task<DownloadFile> PrepareDownloadAsync(long archiveId, string relativePath, CancellationToken cancellationToken)
     {
         Archive? archive = await _repository.GetArchiveByIdAsync(archiveId, cancellationToken) ?? throw new InvalidOperationException("Archive not found / 未找到归档");
@@ -228,6 +335,60 @@ public sealed class WebSession
         catch
         {
             // A download may still have the file open; the next process cleanup can remove it.
+        }
+    }
+}
+
+public sealed record ArchiveJobSnapshot(Guid Id, string Stage, int Percent, long Completed, long Total, string Message, string Status, long? ArchiveId, string? Error);
+
+public sealed class ArchiveJob
+{
+    private readonly object _sync = new();
+    private string _stage = "queued";
+    private int _percent;
+    private long _completed;
+    private long _total;
+    private string _message = "Queued";
+    private string _status = "running";
+    private long? _archiveId;
+    private string? _error;
+
+    public ArchiveJob(Guid id) => Id = id;
+    public Guid Id { get; }
+
+    public void Report(ArchiveProgressUpdate progress)
+    {
+        lock (_sync)
+        {
+            _stage = progress.Stage;
+            _percent = Math.Clamp(progress.Percent, 0, 100);
+            _completed = progress.Completed;
+            _total = progress.Total;
+            _message = progress.Message;
+        }
+    }
+
+    public void Complete(long archiveId)
+    {
+        lock (_sync)
+        {
+            _stage = "completed"; _percent = 100; _message = "Archive complete"; _status = "completed"; _archiveId = archiveId;
+        }
+    }
+
+    public void Fail(string error)
+    {
+        lock (_sync)
+        {
+            _status = "failed"; _error = error; _message = "Archive failed";
+        }
+    }
+
+    public ArchiveJobSnapshot Snapshot()
+    {
+        lock (_sync)
+        {
+            return new ArchiveJobSnapshot(Id, _stage, _percent, _completed, _total, _message, _status, _archiveId, _error);
         }
     }
 }
