@@ -2,10 +2,9 @@
 
 A structured local archive and retrieval tool for cold data
 
-Amber is a CLI/TUI application for local cold-archive workflows. It uses 7z to create archive packages and SQLite to persist archive metadata and file indexes, so archived directories can still be searched, browsed, inspected, and restored after they leave the active working set.
+Amber is a local Web application for cold-archive workflows. It uses 7z to create archive packages and SQLite to persist archive metadata and file indexes, so archived directories can still be searched, browsed, inspected, downloaded, and restored after they leave the active working set.
 
-<img width="2265" height="1079" alt="image" src="https://github.com/user-attachments/assets/c56e2fe9-f97f-42cc-8f20-31763955a26c" />
-
+<img width="2265" height="1079" alt="Amber Web UI" src="https://github.com/user-attachments/assets/c56e2fe9-f97f-42cc-8f20-31763955a26c" />
 
 ## Overview
 
@@ -15,13 +14,13 @@ The project combines:
 
 - archive packaging with 7z
 - external metadata indexing with SQLite
-- terminal workflows for browsing, searching, exporting structure, and restoring files
+- a local browser interface for creating, browsing, searching, downloading, and restoring archives
 
 Instead of treating an archive as a compressed blob with no practical index, Amber keeps package data and metadata separate. This makes it easier to search across archived material without opening each archive package individually.
 
 ## Features
 
-- CLI and interactive TUI
+- local Web UI served by the Amber process
 - 7z-based directory archiving
 - external SQLite index powered by Dapper
 - separate compressed and stored archive packages
@@ -31,7 +30,7 @@ Instead of treating an archive as a compressed blob with no practical index, Amb
 - configurable database and archive output paths
 - archive package and database path migration
 - optional advanced compression settings
-- bilingual terminal interface in English and Chinese
+- archive creation progress with separate scan, classification, compression, and indexing stages
 
 ## How It Works
 
@@ -107,12 +106,6 @@ The explicit Web command is also available:
 dotnet run -- web
 ```
 
-Terminal UI (secondary):
-
-```powershell README.md
-dotnet run -- ui
-```
-
 Help:
 
 ```powershell README.md
@@ -167,18 +160,6 @@ dotnet run -- extract 12 --file "docs/report.pdf" --out "D:\Restore"
 - browse recorded archive entries or run keyword searches later
 - export a placeholder tree when the directory structure needs to be reviewed
 - restore a single file or extract the full archive when needed
-
-## TUI
-
-The interactive interface supports:
-
-- archive creation
-- archive browsing
-- archive search
-- single-file extraction
-- full extraction
-- placeholder tree export
-- storage path updates
 
 ## License
 
